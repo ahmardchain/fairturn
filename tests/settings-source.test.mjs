@@ -487,6 +487,14 @@ test("Telegram conversations remain attached and always settle visible thinking 
     new URL("../lib/minds.ts", import.meta.url),
     "utf8",
   );
+  const workspaceSource = await readFile(
+    new URL("../lib/owner-workspace-context.ts", import.meta.url),
+    "utf8",
+  );
+  const systemPromptSource = await readFile(
+    new URL("../lib/fairturn-system-prompt.ts", import.meta.url),
+    "utf8",
+  );
 
   assert.doesNotMatch(workerSource, /accepted: "queued"/);
   assert.match(workerSource, /return handler\.fetch\(request, env, ctx\)/);
@@ -503,4 +511,16 @@ test("Telegram conversations remain attached and always settle visible thinking 
   assert.match(webhookSource, /await typing\.finishWithReply/);
   assert.match(mindsSource, /timeoutMs: 18_000/);
   assert.match(mindsSource, /assistantReply must be a helpful non-null reply/);
+  assert.match(mindsSource, /ownerPrivateControl/);
+  assert.match(mindsSource, /extractOwnerConversationalReply/);
+  assert.match(webhookSource, /getOwnerWorkspaceContext/);
+  assert.match(webhookSource, /ownerWorkspace,/);
+  assert.match(workspaceSource, /verifiedOwnerPrivateChat: true/);
+  assert.match(workspaceSource, /managerCanReadSubagentPersonalInbox: false/);
+  assert.match(
+    workspaceSource,
+    /ne\(inboxItems\.source, "telegram_business_scout"\)/,
+  );
+  assert.match(systemPromptSource, /Understand intent across paraphrases/);
+  assert.match(systemPromptSource, /answer ordinary questions/);
 });

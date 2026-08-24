@@ -67,6 +67,7 @@ import {
   writeMemory,
 } from "../../../../lib/supabase-memory";
 import { getAgentSettings } from "../../../../lib/agent-settings";
+import { getOwnerWorkspaceContext } from "../../../../lib/owner-workspace-context";
 import { redactMessage } from "../../../../lib/triage";
 import {
   getTelegramPhotoAttachment,
@@ -1277,6 +1278,7 @@ export async function POST(request: Request) {
       knowledgeItems,
       media,
       adminIdentityContext,
+      ownerWorkspace,
     ] =
       await Promise.all([
         getRelevantMemoryAcrossChats({
@@ -1329,6 +1331,12 @@ export async function POST(request: Request) {
               sender: message.from,
             })
           : Promise.resolve(null),
+        isOwnerPrivateControlChat
+          ? getOwnerWorkspaceContext({
+              ownerTelegramUserId: managedBotContext.ownerTelegramUserId,
+              currentAgent: managedBotContext,
+            })
+          : Promise.resolve(null),
       ]);
     const knowledgeAttachments = await getKnowledgeAttachments(
       knowledgeItems,
@@ -1352,6 +1360,8 @@ export async function POST(request: Request) {
         : isCommunityMessage
           ? "telegram_community"
           : "telegram_agent_direct",
+      ownerPrivateControl: isOwnerPrivateControlChat,
+      ownerWorkspace,
       executionRole: managedBotContext.agentRole,
       managerAgent: "FairTurn",
       managedSubagent:

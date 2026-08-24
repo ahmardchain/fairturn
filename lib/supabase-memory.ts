@@ -8,6 +8,8 @@ export type FairTurnMemory = {
   metadata: Record<string, unknown>;
   createdAt: string;
   expiresAt: string | null;
+  scope?: MemoryScope;
+  subjectId?: string;
 };
 
 type MemoryScope = "community" | "private_inbox";
@@ -42,7 +44,7 @@ export async function getRelevantMemory(input: {
   if (!configuration) return [];
 
   const query = new URLSearchParams({
-    select: "id,kind,summary,metadata,created_at,expires_at",
+    select: "id,scope,subject_id,kind,summary,metadata,created_at,expires_at",
     owner_id: `eq.${input.ownerId}`,
     agent_id: `eq.${input.agentId}`,
     scope: `eq.${input.scope}`,
@@ -60,6 +62,8 @@ export async function getRelevantMemory(input: {
     if (!response.ok) return [];
     const rows = (await response.json()) as Array<{
       id: string;
+      scope: MemoryScope;
+      subject_id: string;
       kind: string;
       summary: string;
       metadata?: Record<string, unknown> | null;
@@ -73,6 +77,8 @@ export async function getRelevantMemory(input: {
       metadata: row.metadata ?? {},
       createdAt: row.created_at,
       expiresAt: row.expires_at ?? null,
+      scope: row.scope,
+      subjectId: row.subject_id,
     }));
   } catch {
     return [];
@@ -120,7 +126,7 @@ export async function listAgentMemory(input: {
   const configuration = await getSupabaseConfiguration();
   if (!configuration) return [];
   const query = new URLSearchParams({
-    select: "id,kind,summary,metadata,created_at,expires_at",
+    select: "id,scope,subject_id,kind,summary,metadata,created_at,expires_at",
     owner_id: `eq.${input.ownerId}`,
     agent_id: `eq.${input.agentId}`,
     or: `(expires_at.is.null,expires_at.gt.${new Date().toISOString()})`,
@@ -136,6 +142,8 @@ export async function listAgentMemory(input: {
     if (!response.ok) return [];
     const rows = (await response.json()) as Array<{
       id: string;
+      scope: MemoryScope;
+      subject_id: string;
       kind: string;
       summary: string;
       metadata?: Record<string, unknown> | null;
@@ -149,6 +157,8 @@ export async function listAgentMemory(input: {
       metadata: row.metadata ?? {},
       createdAt: row.created_at,
       expiresAt: row.expires_at ?? null,
+      scope: row.scope,
+      subjectId: row.subject_id,
     }));
   } catch {
     return [];
