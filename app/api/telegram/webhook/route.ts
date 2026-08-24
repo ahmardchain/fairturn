@@ -195,6 +195,23 @@ function assistantReplyOrFallback(input: {
   return "I couldn’t produce a useful answer for that yet. Please rephrase it and try again.";
 }
 
+function telegramBusinessGreeting(user?: TelegramUser) {
+  const displayName = redactMessage(
+    [user?.first_name, user?.last_name]
+      .filter((part): part is string => Boolean(part?.trim()))
+      .join(" ") ||
+      user?.username ||
+      "",
+  )
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 80);
+
+  return displayName
+    ? `Hi! ${displayName}. How can I help?`
+    : "Hi! How can I help?";
+}
+
 function protectOwnerAssistantReply(reply: string | null) {
   if (!reply) return null;
   const exposesPrivateRuntimeDetails =
@@ -1162,6 +1179,27 @@ export async function POST(request: Request) {
     });
   if (shouldReplyToMessage) {
     await typing.showVisible(message.message_id);
+  }
+
+  if (isBusinessMessage && isSimpleCommunityGreeting(text)) {
+    const greeting = telegramBusinessGreeting(message.from);
+    const replacedThinkingMessage = await typing.finishWithReply(greeting);
+    if (!replacedThinkingMessage) {
+      await telegramBotApi(token, "sendMessage", {
+        chat_id: String(message.chat.id),
+        text: greeting,
+        reply_parameters: { message_id: message.message_id },
+        ...(message.business_connection_id
+          ? { business_connection_id: message.business_connection_id }
+          : {}),
+      });
+    }
+    await typing.cleanup();
+    return Response.json({
+      ok: true,
+      accepted: "business_greeting",
+      automaticReplySent: true,
+    });
   }
 
   if (!isBusinessMessage && isSimpleCommunityGreeting(text)) {
