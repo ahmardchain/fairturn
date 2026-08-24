@@ -184,8 +184,15 @@ function assistantReplyOrFallback(input: {
   assistantReply: string | null;
   messageText: string;
   failureCode: string | null;
+  businessUser?: TelegramUser;
 }) {
   if (input.assistantReply) return input.assistantReply;
+  if (input.businessUser) {
+    return telegramBusinessContinuityFallback(
+      input.messageText,
+      input.businessUser,
+    );
+  }
   if (isSimpleCommunityGreeting(input.messageText)) {
     return "Hi 👋 I’m FairTurn. I can help with community questions, moderation, summaries, polls, events, and more. What do you need?";
   }
@@ -214,6 +221,34 @@ function telegramBusinessGreeting(user?: TelegramUser) {
   return displayName
     ? `Hi! ${displayName}. How can I help?`
     : "Hi! How can I help?";
+}
+
+function telegramBusinessContinuityFallback(
+  messageText: string,
+  user?: TelegramUser,
+) {
+  const displayName = telegramDisplayName(user).split(/\s+/u)[0] ?? "";
+  const normalized = messageText
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s']/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+
+  if (
+    /\bhow (?:are|r) (?:you|u)(?: doing)?\b/u.test(normalized) ||
+    /\bhow(?:'s| is| was) your day\b/u.test(normalized)
+  ) {
+    return `I’m doing well${displayName ? `, ${displayName}` : ""} 😊 How about you?`;
+  }
+  if (/\b(?:thank you|thanks|thank u|ty)\b/u.test(normalized)) {
+    return "You’re welcome 😊";
+  }
+  if (/\b(?:good night|goodnight)\b/u.test(normalized)) {
+    return `Good night${displayName ? `, ${displayName}` : ""} 😊`;
+  }
+
+  return "I’m here 😊 Tell me a little more.";
 }
 
 function protectOwnerAssistantReply(reply: string | null) {
@@ -1523,6 +1558,18 @@ export async function POST(request: Request) {
       mediaAttachments: media ? [media] : [],
       knowledgeAttachments,
     });
+    if (resolution.failureCode) {
+      console.warn("FairTurn is using a safe conversational fallback", {
+        updateId: update.update_id,
+        channel: isBusinessMessage
+          ? "telegram_business"
+          : isCommunityMessage
+            ? "telegram_community"
+            : "telegram_agent_direct",
+        failureCode: resolution.failureCode,
+        managedBotId: managedBotContext.id,
+      });
+    }
 
     const contextualOverride = planContextualSafetyOverride({
       deterministicVerdict,
@@ -1659,6 +1706,7 @@ export async function POST(request: Request) {
             : resolution.assistantReply,
           messageText: textForMind,
           failureCode: resolution.failureCode,
+          businessUser: isBusinessMessage ? message.from : undefined,
         })
       : null;
     if (
@@ -1854,8 +1902,9 @@ export async function POST(request: Request) {
       error: error instanceof Error ? error.message : "Unknown error",
     });
     if (shouldReplyToMessage && !automaticReplySent) {
-      const failureReply =
-        "⚠️ Sorry, I couldn’t finish that request right now. Please try again in a moment.";
+      const failureReply = isBusinessMessage
+        ? telegramBusinessContinuityFallback(text, message.from)
+        : "⚠️ Sorry, I couldn’t finish that request right now. Please try again in a moment.";
       const replacedThinkingMessage = await typing.finishWithReply(
         failureReply,
       );

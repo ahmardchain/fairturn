@@ -582,8 +582,26 @@ test("selected Telegram Business inbox messages receive a subagent reply without
   assert.match(promptSource, /Answer the sender's actual message/);
   assert.match(promptSource, /Do not restart the conversation after the first greeting/);
   assert.match(mindsSource, /fairturn_telegram_business_conversation_and_safety/);
+  assert.match(mindsSource, /TELEGRAM_BUSINESS_SYSTEM_PROMPT/);
+  assert.match(
+    mindsSource,
+    /context\?\.ownerPrivateControl \|\| isTelegramBusinessConversation/,
+  );
+  assert.match(
+    mindsSource,
+    /Telegram Business conversation received a direct Minds answer/,
+  );
   assert.match(mindsSource, /needsNaturalBusinessRewrite/);
   assert.match(mindsSource, /fairturn_telegram_business_natural_reply_correction/);
   assert.match(mindsSource, /rewriteNaturalBusinessReply/);
   assert.match(mindsSource, /timeoutMs: 12_000/);
+  assert.match(webhookSource, /function telegramBusinessContinuityFallback/);
+  assert.match(
+    webhookSource,
+    /I’m doing well\$\{displayName \? `, \$\{displayName\}` : ""\} 😊 How about you\?/,
+  );
+  assert.match(
+    webhookSource,
+    /const failureReply = isBusinessMessage[\s\S]*telegramBusinessContinuityFallback/,
+  );
 });
