@@ -552,7 +552,7 @@ export async function resolveWithFairTurnMind(
     });
     const outcome = await client.waitForReply({
       alias: conversationAlias,
-      timeoutMs: 45_000,
+      timeoutMs: 18_000,
       afterFingerprint: before,
       sentMessageText: prompt,
     });

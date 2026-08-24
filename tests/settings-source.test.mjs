@@ -465,3 +465,38 @@ test("manager and subagent share community abilities while inbox automation stay
   assert.match(schemaSource, /managed_bots_manager_owner_unique/);
   assert.match(executionSource, /getFairTurnAgentToken/);
 });
+
+test("Telegram conversations acknowledge quickly and always settle visible thinking feedback", async () => {
+  const workerSource = await readFile(
+    new URL("../worker/index.ts", import.meta.url),
+    "utf8",
+  );
+  const typingSource = await readFile(
+    new URL("../lib/telegram-typing.ts", import.meta.url),
+    "utf8",
+  );
+  const runtimeSource = await readFile(
+    new URL("../lib/community-runtime.ts", import.meta.url),
+    "utf8",
+  );
+  const webhookSource = await readFile(
+    new URL("../app/api/telegram/webhook/route.ts", import.meta.url),
+    "utf8",
+  );
+  const mindsSource = await readFile(
+    new URL("../lib/minds.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(workerSource, /ctx\.waitUntil\(/);
+  assert.match(workerSource, /accepted: "queued"/);
+  assert.match(typingSource, /✨ Thinking\.\.\./);
+  assert.match(typingSource, /setInterval\([\s\S]*2_000/);
+  assert.match(typingSource, /finishWithReply/);
+  assert.match(typingSource, /async cleanup\(\)/);
+  assert.match(runtimeSource, /isSimpleCommunityGreeting/);
+  assert.match(webhookSource, /assistantReplyOrFallback/);
+  assert.match(webhookSource, /void typing\.showVisible/);
+  assert.match(webhookSource, /await typing\.finishWithReply/);
+  assert.match(mindsSource, /timeoutMs: 18_000/);
+});

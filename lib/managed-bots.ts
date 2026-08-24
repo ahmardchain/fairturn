@@ -79,6 +79,7 @@ export async function telegramBotApi<T>(
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body ?? {}),
+    signal: AbortSignal.timeout(10_000),
   });
   const payload = (await response.json()) as TelegramApiResult<T>;
   if (!response.ok || !payload.ok || payload.result === undefined) {

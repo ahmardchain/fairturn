@@ -792,6 +792,12 @@ export async function maybePinAnnouncement(input: {
   }
 }
 
+export function isSimpleCommunityGreeting(text: string) {
+  return /^(?:(?:hi|hello|hey|yo)(?:\s+(?:there|everyone|all|fairturn))?|good\s+(?:morning|afternoon|evening)(?:\s+(?:everyone|all|fairturn))?)[\s!.,👋🙂😊]*$/iu.test(
+    text.trim(),
+  );
+}
+
 export function shouldAnswerCommunityMessage(input: {
   message: CommunityTelegramMessage;
   botTelegramUserId: string;
@@ -819,7 +825,8 @@ export function shouldAnswerCommunityMessage(input: {
   };
   return (
     input.message.chat.type === "private" ||
-    (preferences.respondWhenRelevant && /\?\s*$/u.test(text)) ||
+    (preferences.respondWhenRelevant &&
+      (/\?\s*$/u.test(text) || isSimpleCommunityGreeting(text))) ||
     (preferences.respondWhenTagged && tagged) ||
     (preferences.respondWhenReplied && repliedTo)
   );

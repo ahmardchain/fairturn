@@ -46,6 +46,7 @@ import {
   inspectMemberMessage,
   maybePinAnnouncement,
   recordCommunityMessage,
+  isSimpleCommunityGreeting,
   shouldAnswerCommunityMessage,
   type CommunityTelegramMessage,
 } from "../../../../lib/community-runtime";
@@ -174,6 +175,21 @@ function parseJsonRecord(value: string) {
   } catch {
     return {};
   }
+}
+
+function assistantReplyOrFallback(input: {
+  assistantReply: string | null;
+  messageText: string;
+  failureCode: string | null;
+}) {
+  if (input.assistantReply) return input.assistantReply;
+  if (isSimpleCommunityGreeting(input.messageText)) {
+    return "Hi 👋 I’m FairTurn. I can help with community questions, moderation, summaries, polls, events, and more. What do you need?";
+  }
+  if (input.failureCode) {
+    return "⚠️ Sorry, I couldn’t finish that request right now. Please try again in a moment.";
+  }
+  return "I couldn’t produce a useful answer for that yet. Please rephrase it and try again.";
 }
 
 async function managedToken(
@@ -1037,6 +1053,22 @@ export async function POST(request: Request) {
     chatId: message.chat.id,
     businessConnectionId: message.business_connection_id,
   });
+  const responsePreferences = {
+    respondWhenTagged: creatorAgentSettings.respondWhenTagged,
+    respondWhenReplied: creatorAgentSettings.respondWhenReplied,
+    respondWhenRelevant: creatorAgentSettings.respondWhenRelevant,
+  };
+  const shouldReplyToMessage =
+    !isBusinessMessage &&
+    shouldAnswerCommunityMessage({
+      message: message as CommunityTelegramMessage,
+      botTelegramUserId: managedBotContext.botTelegramUserId,
+      botUsername: managedBotContext.username,
+      preferences: responsePreferences,
+    });
+  if (shouldReplyToMessage) {
+    void typing.showVisible(message.message_id);
+  }
   await ensureConversationalBotInterface({
     token,
     botTelegramUserId: managedBotContext.botTelegramUserId,
@@ -1063,7 +1095,7 @@ export async function POST(request: Request) {
       });
       return Response.json({ ok: true, accepted: "new_members", results });
     } finally {
-      typing.stop();
+      await typing.cleanup();
     }
   }
 
@@ -1079,18 +1111,18 @@ export async function POST(request: Request) {
         message: message as TelegramKnowledgeMessage,
       });
     } catch (error) {
-      typing.stop();
+      await typing.cleanup();
       throw error;
     }
 
     if (knowledgeHandled) {
-      typing.stop();
+      await typing.cleanup();
       return Response.json({ ok: true, accepted: "community_knowledge" });
     }
   }
 
   if (!text.trim() && !message.photo?.length) {
-    typing.stop();
+    await typing.cleanup();
     return Response.json({
       ok: true,
       accepted: false,
@@ -1098,6 +1130,7 @@ export async function POST(request: Request) {
     });
   }
 
+  let automaticReplySent = false;
   try {
     const memoryScope = isBusinessMessage ? "private_inbox" : "community";
     const communityId = isCommunityMessage
@@ -1408,28 +1441,29 @@ export async function POST(request: Request) {
       });
     }
 
-    let automaticReplySent = false;
+    const assistantReply = shouldReplyToMessage
+      ? assistantReplyOrFallback({
+          assistantReply: resolution.assistantReply,
+          messageText: textForMind,
+          failureCode: resolution.failureCode,
+        })
+      : null;
     if (
       !isBusinessMessage &&
       !effectiveVerdict.flagged &&
-      resolution.assistantReply &&
-      shouldAnswerCommunityMessage({
-        message: message as CommunityTelegramMessage,
-        botTelegramUserId: managedBotContext.botTelegramUserId,
-        botUsername: managedBotContext.username,
-        preferences: {
-          respondWhenTagged: creatorAgentSettings.respondWhenTagged,
-          respondWhenReplied: creatorAgentSettings.respondWhenReplied,
-          respondWhenRelevant: creatorAgentSettings.respondWhenRelevant,
-        },
-      })
+      assistantReply &&
+      shouldReplyToMessage
     ) {
-      typing.stop();
-      await telegramBotApi(token, "sendMessage", {
-        chat_id: String(message.chat.id),
-        text: resolution.assistantReply,
-        reply_parameters: { message_id: message.message_id },
-      });
+      const replacedThinkingMessage = await typing.finishWithReply(
+        assistantReply,
+      );
+      if (!replacedThinkingMessage) {
+        await telegramBotApi(token, "sendMessage", {
+          chat_id: String(message.chat.id),
+          text: assistantReply,
+          reply_parameters: { message_id: message.message_id },
+        });
+      }
       automaticReplySent = true;
     }
 
@@ -1598,7 +1632,32 @@ export async function POST(request: Request) {
       },
       automaticReplySent,
     });
+  } catch (error) {
+    console.error("Telegram message processing failed", {
+      updateId: update.update_id,
+      chatType: message.chat.type,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    if (shouldReplyToMessage && !automaticReplySent) {
+      const failureReply =
+        "⚠️ Sorry, I couldn’t finish that request right now. Please try again in a moment.";
+      const replacedThinkingMessage = await typing.finishWithReply(
+        failureReply,
+      );
+      if (!replacedThinkingMessage) {
+        await telegramBotApi(token, "sendMessage", {
+          chat_id: String(message.chat.id),
+          text: failureReply,
+          reply_parameters: { message_id: message.message_id },
+        }).catch(() => {});
+      }
+    }
+    return Response.json({
+      ok: true,
+      accepted: false,
+      reason: "Message processing failed after acknowledgement",
+    });
   } finally {
-    typing.stop();
+    await typing.cleanup();
   }
 }
