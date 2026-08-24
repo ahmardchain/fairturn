@@ -13,6 +13,206 @@ memory, groups, knowledge, tasks, and audit history—and it alone may connect t
 Telegram Business for only the private chats its verified owner selects.
 
 
+# 🛡️ FairTurn Moderation
+
+Protects the community and helps moderators manage it fairly.
+
+🧠 Context-Aware Moderation
+
+Understands the intent and context of messages instead of relying only on keyword lists.
+
+Detects:
+
+- Spam and repeated messages
+- Scam links and social engineering
+- Harassment and bullying
+- Hate speech and threats
+- Doxxing
+- NSFW content
+- Suspicious behavior
+
+🥸 Anti-Impersonation Shield
+
+Detects users pretending to be creators, admins, or moderators.
+
+FairTurn can combine identity similarities with conversation intent to recognize attacks such as:
+
+Fake Admin → “DM me to verify your wallet” → scam intent detected
+
+It can remove the message, restrict the impersonator, and report evidence to administrators.
+
+🗣️ Argument Intervention
+
+FairTurn recognizes when normal disagreement is turning into a hostile argument.
+
+It can step into the conversation, ask participants to stop, and escalate moderation when they continue.
+
+🚨 Anti-Raid Protection
+
+Detects unusual waves of suspicious joins or coordinated activity and can activate protective measures.
+
+🤝 Moderator Pact
+
+Moderators define their:
+
+- Availability
+- Capacity
+- Expertise
+- Content boundaries
+- Cases they don't want to review
+
+FairTurn respects those boundaries when distributing moderation work.
+
+⚖️ Fair Workload
+
+FairTurn prevents the same moderators from constantly carrying the community.
+
+It distributes work based on availability, capacity, previous workload, and moderator boundaries.
+
+Everyone gets a FairTurn.
+
+🗣️ Decision Huddles
+
+When community rules are ambiguous, FairTurn can escalate the case instead of making up an answer.
+
+Moderators discuss it, reach a decision, and that clarification can become persistent knowledge for similar future situations.
+
+📜 Moderation Audit Trail
+
+Important moderation actions can record:
+
+- What happened
+- Why FairTurn flagged it
+- Which policy was involved
+- What action was taken
+- Whether a human intervened
+
+---
+
+# FairTurn Assistant
+
+Helps creators run, understand, and engage their community.
+
+Moderation asks:
+
+«“Is this community safe?”»
+
+The Assistant asks:
+
+«“What can I take off the creator's plate?”»
+
+💬 Community Q&A
+
+Members can naturally ask FairTurn questions.
+
+FairTurn answers using community knowledge such as:
+
+- Rules
+- FAQs
+- Documents
+- Whitepapers
+- Creator instructions
+- Websites
+- Persistent memory
+
+👋 Member Assistance
+
+FairTurn can welcome newcomers, explain how the community works, and help members find information without requiring an admin every time.
+
+📝 Community Summaries
+
+Creators can return after being offline and ask FairTurn what happened.
+
+It can surface:
+
+- Important discussions
+- Decisions
+- Problems
+- Questions needing attention
+- Important opportunities
+
+💼 Opportunity Rescue
+
+FairTurn identifies valuable messages that might otherwise disappear in community noise, such as:
+
+- Partnerships
+- Sponsorships
+- Collaborations
+- Business opportunities
+- Important member requests
+
+📅 Community Automation
+
+FairTurn can help creators run:
+
+- Scheduled posts
+- Events
+- Polls
+- Quizzes
+- Giveaways
+- Reminders
+- Recurring tasks
+
+📥 Inbox Automation
+
+The creator-owned subagent can assist with selected Telegram Business conversations.
+
+It can:
+
+- Summarize unread DMs
+- Understand what each person wants
+- Prioritize important conversations
+- Detect business opportunities
+- Answer common questions
+- Draft personalized replies
+- Use the creator's instructions and knowledge
+- Remember useful conversation context
+- Escalate conversations that need the creator
+- Send replies automatically where the creator explicitly allows it
+
+Sensitive conversations can remain behind human approval.
+
+🤖 Creator-Owned Subagent
+
+FairTurn manages the community, while creators can create a separate subagent to assist with their personal workflow.
+
+The subagent has its own:
+
+- Identity
+- Memory
+- Instructions
+- Knowledge
+- Tasks
+- Connected groups
+- Inbox permissions
+
+This keeps personal-assistant data separated from the main community agent.
+
+
+
+🧠 Minds — The Intelligence Layer
+
+Minds connects both sides.
+
+Moderation
+
+Telegram message → FairTurn → context + community rules + memory → Minds reasoning → moderation decision → action/escalation → memory
+
+Assistant
+
+Member/creator request → FairTurn → knowledge + instructions + memory → Minds reasoning → useful response/action → memory
+
+Inbox
+
+DM → Subagent → intent + creator instructions + memory → Minds reasoning → prioritize/draft → approval or permitted reply
+
+FairTurn therefore isn't simply a moderation bot.
+
+It's a persistent AI community teammate with two responsibilities:
+
+🛡️ Moderation — protect the community and support the humans moderating it.
+
+✨ Assistant — reduce the creator's everyday community and communication workload.
 
 ## Why this is different
 
