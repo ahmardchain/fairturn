@@ -466,7 +466,7 @@ test("manager and subagent share community abilities while inbox automation stay
   assert.match(executionSource, /getFairTurnAgentToken/);
 });
 
-test("Telegram conversations acknowledge quickly and always settle visible thinking feedback", async () => {
+test("Telegram conversations remain attached and always settle visible thinking feedback", async () => {
   const workerSource = await readFile(
     new URL("../worker/index.ts", import.meta.url),
     "utf8",
@@ -488,15 +488,16 @@ test("Telegram conversations acknowledge quickly and always settle visible think
     "utf8",
   );
 
-  assert.match(workerSource, /ctx\.waitUntil\(/);
-  assert.match(workerSource, /accepted: "queued"/);
+  assert.doesNotMatch(workerSource, /accepted: "queued"/);
+  assert.match(workerSource, /return handler\.fetch\(request, env, ctx\)/);
   assert.match(typingSource, /✨ Thinking\.\.\./);
   assert.match(typingSource, /setInterval\([\s\S]*2_000/);
   assert.match(typingSource, /finishWithReply/);
   assert.match(typingSource, /async cleanup\(\)/);
   assert.match(runtimeSource, /isSimpleCommunityGreeting/);
   assert.match(webhookSource, /assistantReplyOrFallback/);
-  assert.match(webhookSource, /void typing\.showVisible/);
+  assert.match(webhookSource, /await typing\.showVisible/);
+  assert.match(webhookSource, /accepted: "simple_greeting"/);
   assert.match(webhookSource, /await typing\.finishWithReply/);
   assert.match(mindsSource, /timeoutMs: 18_000/);
 });

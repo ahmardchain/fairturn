@@ -1067,7 +1067,29 @@ export async function POST(request: Request) {
       preferences: responsePreferences,
     });
   if (shouldReplyToMessage) {
-    void typing.showVisible(message.message_id);
+    await typing.showVisible(message.message_id);
+  }
+
+  if (!isBusinessMessage && isSimpleCommunityGreeting(text)) {
+    const greeting = assistantReplyOrFallback({
+      assistantReply: null,
+      messageText: text,
+      failureCode: null,
+    });
+    const replacedThinkingMessage = await typing.finishWithReply(greeting);
+    if (!replacedThinkingMessage) {
+      await telegramBotApi(token, "sendMessage", {
+        chat_id: String(message.chat.id),
+        text: greeting,
+        reply_parameters: { message_id: message.message_id },
+      });
+    }
+    await typing.cleanup();
+    return Response.json({
+      ok: true,
+      accepted: "simple_greeting",
+      automaticReplySent: true,
+    });
   }
   await ensureConversationalBotInterface({
     token,
