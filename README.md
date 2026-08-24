@@ -330,6 +330,11 @@ then set the two server runtime variables above. Supabase stores redacted
 preferences and decision outcomes; D1 remains the operational queue and audit
 store. FairTurn never writes raw Telegram private-message text to either store.
 
+After applying the migration, run `supabase/verify_fairturn_memory.sql`. The
+expected security result is `anon_can_select = false`,
+`authenticated_can_select = false`, and every `service_can_*` value `true`.
+The policy query should return zero rows because this is a server-only table.
+
 The Supabase secret key bypasses row-level security and therefore must remain
 server-only. The migration deliberately creates no browser-access policy.
 
