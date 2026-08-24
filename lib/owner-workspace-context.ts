@@ -512,10 +512,11 @@ export async function getOwnerWorkspaceContext(input: {
       lastError: safeText(agent.lastError, 240),
     })),
     groups: groupRows.map((group) => ({
-      ...group,
+      name: group.name,
       agentName: group.managedBotId
         ? agentName.get(group.managedBotId) ?? null
         : null,
+      connectedAt: group.createdAt,
     })),
     settings: {
       manager: managerSettingsRows[0]

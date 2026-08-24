@@ -508,6 +508,9 @@ test("Telegram conversations remain attached and always settle visible thinking 
   assert.match(webhookSource, /accepted: "simple_greeting"/);
   assert.match(webhookSource, /accepted: "owner_group_lookup"/);
   assert.match(webhookSource, /eq\(communities\.managedBotId, managedBotContext\.id\)/);
+  assert.match(webhookSource, /help\(\?:ed\|ing\)\?/);
+  assert.match(webhookSource, /I’m currently helping 1 group/);
+  assert.match(webhookSource, /owner-control-v2/);
   assert.match(webhookSource, /await typing\.finishWithReply/);
   assert.match(mindsSource, /timeoutMs: 18_000/);
   assert.match(mindsSource, /assistantReply must be a helpful non-null reply/);
@@ -517,10 +520,13 @@ test("Telegram conversations remain attached and always settle visible thinking 
   assert.match(webhookSource, /ownerWorkspace,/);
   assert.match(workspaceSource, /verifiedOwnerPrivateChat: true/);
   assert.match(workspaceSource, /managerCanReadSubagentPersonalInbox: false/);
+  assert.doesNotMatch(workspaceSource, /\.\.\.group,/);
   assert.match(
     workspaceSource,
     /ne\(inboxItems\.source, "telegram_business_scout"\)/,
   );
   assert.match(systemPromptSource, /Understand intent across paraphrases/);
   assert.match(systemPromptSource, /answer ordinary questions/);
+  assert.match(systemPromptSource, /Never expose or mention internal database IDs/);
+  assert.match(systemPromptSource, /must not override ownerWorkspace/);
 });

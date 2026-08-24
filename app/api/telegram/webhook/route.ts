@@ -195,12 +195,48 @@ function assistantReplyOrFallback(input: {
 }
 
 function asksForConnectedGroups(text: string) {
-  const normalized = text.toLowerCase().replace(/[^a-z0-9\s]/gu, " ");
-  return (
-    /\b(?:which|what|show|list|where|how many)\b[\s\S]*\b(?:group|groups|community|communities)\b/u.test(
+  const normalized = text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const mentionsWorkspace =
+    /\b(?:group|groups|community|communities|chat|chats|channel|channels|server|servers)\b/u.test(
       normalized,
-    ) &&
-    /\b(?:add|added|connect|connected|manage|managing|joined|in|to)\b/u.test(
+    );
+  const describesAgentConnection =
+    /\b(?:you|fairturn|this agent)\b[\s\S]{0,48}\b(?:connect(?:ed|ing)?|manag(?:e|ed|ing)|moderat(?:e|ed|ing)|help(?:ed|ing)?|serv(?:e|ed|ing)|work(?:ed|ing)?|deploy(?:ed|ing)?|assign(?:ed|ing)?|active|running|in|inside|part of)\b/u.test(
+      normalized,
+    ) ||
+    /\b(?:add(?:ed|ing)?|connect(?:ed|ing)?|deploy(?:ed|ing)?|assign(?:ed|ing)?|join(?:ed|ing)?|put)\b[\s\S]{0,48}\b(?:you|fairturn|this agent)\b/u.test(
+      normalized,
+    ) ||
+    /\b(?:group|groups|community|communities|chat|chats|channel|channels|server|servers)\b[\s\S]{0,48}\b(?:us(?:e|ed|ing)|connect(?:ed|ing)?|manag(?:e|ed|ing)|moderat(?:e|ed|ing)|help(?:ed|ing)?|serv(?:e|ed|ing))\b[\s\S]{0,24}\b(?:by\s+)?(?:you|fairturn|this agent)\b/u.test(
+      normalized,
+    );
+  const asksAboutStatus =
+    /\b(?:which|what|where|show|list|name|how many|are|do|did|have|currently)\b/u.test(
+      normalized,
+    );
+  const asksForInventory =
+    /\bhow many\s+(?:telegram\s+)?(?:groups|communities|chats|channels|servers)\b/u.test(
+      normalized,
+    ) ||
+    /\b(?:show|list|name)(?:\s+me)?(?:\s+all|\s+every)?(?:\s+of)?(?:\s+the|\s+my|\s+our|\s+your)?(?:\s+telegram)?\s+(?:group|groups|community|communities|chat|chats|channel|channels|server|servers)\b$/u.test(
+      normalized,
+    ) ||
+    /^(?:(?:which|what)(?:\s+are)?\s+)?(?:my|our|your)\s+(?:telegram\s+)?(?:group|groups|community|communities|chat|chats|channel|channels|server|servers)$/u.test(
+      normalized,
+    ) ||
+    /^(?:which|what)\s+(?:telegram\s+)?(?:group|groups|community|communities|chat|chats|channel|channels|server|servers)(?:\s+are\s+there)?$/u.test(
+      normalized,
+    );
+
+  return (
+    asksForInventory ||
+    (mentionsWorkspace && describesAgentConnection && asksAboutStatus) ||
+    /\bwhere\s+(?:(?:are|have)\s+you\s+(?:currently\s+)?(?:working|deployed|active|running|helping|moderating|serving|connected)|do\s+you\s+(?:work|help|moderate|serve))\b/u.test(
       normalized,
     )
   );
@@ -208,13 +244,13 @@ function asksForConnectedGroups(text: string) {
 
 function connectedGroupsReply(groups: Array<{ name: string }>) {
   if (groups.length === 0) {
-    return "This agent isn’t connected to any Telegram group yet.";
+    return "I’m not helping any Telegram group yet.";
   }
   if (groups.length === 1) {
-    return `This agent is connected to: ${groups[0].name}.`;
+    return `I’m currently helping 1 group: ${groups[0].name}.`;
   }
   return [
-    `This agent is connected to ${groups.length} Telegram groups:`,
+    `I’m currently helping ${groups.length} groups:`,
     ...groups.map((group) => `• ${group.name}`),
   ].join("\n");
 }
@@ -1353,6 +1389,7 @@ export async function POST(request: Request) {
         managedBotContext.id,
         memoryScope,
         String(message.chat.id),
+        ...(isOwnerPrivateControlChat ? ["owner-control-v2"] : []),
       ].join(":"),
       chatType: message.chat.type,
       channel: isBusinessMessage
