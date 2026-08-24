@@ -2,6 +2,26 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+test("Cloudflare build config leaves resource IDs to automatic provisioning", async () => {
+  const viteSource = await readFile(
+    new URL("../vite.config.ts", import.meta.url),
+    "utf8",
+  );
+  const wranglerSource = await readFile(
+    new URL("../wrangler.jsonc", import.meta.url),
+    "utf8",
+  );
+
+  for (const source of [viteSource, wranglerSource]) {
+    assert.doesNotMatch(source, /00000000-0000-4000-8000-000000000000/);
+    assert.doesNotMatch(source, /site-creator-d1/);
+    assert.match(source, /fairturn-db/);
+  }
+
+  assert.doesNotMatch(viteSource, /database_id/);
+  assert.doesNotMatch(viteSource, /bucket_name/);
+});
+
 test("Minds is a verified core runtime rather than an environment-string badge", async () => {
   const runtimeSource = await readFile(
     new URL("../lib/minds-runtime.ts", import.meta.url),
