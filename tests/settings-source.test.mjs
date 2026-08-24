@@ -539,6 +539,10 @@ test("selected Telegram Business inbox messages receive a subagent reply without
     new URL("../app/api/telegram/webhook/route.ts", import.meta.url),
     "utf8",
   );
+  const mindsSource = await readFile(
+    new URL("../lib/minds.ts", import.meta.url),
+    "utf8",
+  );
   const promptSource = await readFile(
     new URL("../lib/fairturn-system-prompt.ts", import.meta.url),
     "utf8",
@@ -555,6 +559,9 @@ test("selected Telegram Business inbox messages receive a subagent reply without
   assert.match(webhookSource, /function telegramBusinessGreeting/);
   assert.match(webhookSource, /`Hi! \$\{displayName\}\. How can I help\?`/);
   assert.match(webhookSource, /accepted: "business_greeting"/);
+  assert.match(webhookSource, /creator-conversation-v3/);
+  assert.match(webhookSource, /senderProfile: \{/);
+  assert.match(webhookSource, /identityDisclosure: "only_when_directly_asked"/);
   assert.match(
     webhookSource,
     /text: assistantReply,[\s\S]*business_connection_id: message\.business_connection_id/,
@@ -568,4 +575,11 @@ test("selected Telegram Business inbox messages receive a subagent reply without
   assert.match(promptSource, /write as the creator's delegated assistant/);
   assert.match(promptSource, /do not announce a bot username, say “bot here,”/);
   assert.match(promptSource, /Never falsely claim to be the creator or a human/);
+  assert.match(promptSource, /Answer the sender's actual message/);
+  assert.match(promptSource, /Do not restart the conversation after the first greeting/);
+  assert.match(mindsSource, /fairturn_telegram_business_conversation_and_safety/);
+  assert.match(mindsSource, /needsNaturalBusinessRewrite/);
+  assert.match(mindsSource, /fairturn_telegram_business_natural_reply_correction/);
+  assert.match(mindsSource, /rewriteNaturalBusinessReply/);
+  assert.match(mindsSource, /timeoutMs: 12_000/);
 });

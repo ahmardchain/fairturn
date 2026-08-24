@@ -195,8 +195,8 @@ function assistantReplyOrFallback(input: {
   return "I couldn’t produce a useful answer for that yet. Please rephrase it and try again.";
 }
 
-function telegramBusinessGreeting(user?: TelegramUser) {
-  const displayName = redactMessage(
+function telegramDisplayName(user?: TelegramUser) {
+  return redactMessage(
     [user?.first_name, user?.last_name]
       .filter((part): part is string => Boolean(part?.trim()))
       .join(" ") ||
@@ -206,6 +206,10 @@ function telegramBusinessGreeting(user?: TelegramUser) {
     .replace(/\s+/gu, " ")
     .trim()
     .slice(0, 80);
+}
+
+function telegramBusinessGreeting(user?: TelegramUser) {
+  const displayName = telegramDisplayName(user);
 
   return displayName
     ? `Hi! ${displayName}. How can I help?`
@@ -1458,6 +1462,7 @@ export async function POST(request: Request) {
         managedBotContext.id,
         memoryScope,
         String(message.chat.id),
+        ...(isBusinessMessage ? ["creator-conversation-v3"] : []),
         ...(isOwnerPrivateControlChat ? ["owner-control-v2"] : []),
       ].join(":"),
       chatType: message.chat.type,
@@ -1467,14 +1472,18 @@ export async function POST(request: Request) {
           ? "telegram_community"
           : "telegram_agent_direct",
       ownerPrivateControl: isOwnerPrivateControlChat,
+      senderProfile: {
+        displayName: telegramDisplayName(message.from) || null,
+        languageCode: message.from?.language_code ?? null,
+      },
       ownerWorkspace,
       executionRole: managedBotContext.agentRole,
       managerAgent: "FairTurn",
       managedSubagent:
         managedBotContext.agentRole === "subagent"
           ? {
-              id: managedBotContext.id,
-              username: managedBotContext.username,
+              verifiedCreatorOwned: true,
+              identityDisclosure: "only_when_directly_asked",
             }
           : null,
       agentRole:
