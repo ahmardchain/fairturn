@@ -509,7 +509,10 @@ test("Telegram conversations remain attached and always settle visible thinking 
   assert.match(webhookSource, /accepted: "owner_group_lookup"/);
   assert.match(webhookSource, /eq\(communities\.managedBotId, managedBotContext\.id\)/);
   assert.match(webhookSource, /help\(\?:ed\|ing\)\?/);
+  assert.match(webhookSource, /you\|fairturn\|this agent[\s\S]*add\(\?:ed\|ing\)\?/);
   assert.match(webhookSource, /I’m currently helping 1 group/);
+  assert.match(webhookSource, /protectOwnerAssistantReply/);
+  assert.match(webhookSource, /personal mind\|clum/);
   assert.match(webhookSource, /owner-control-v2/);
   assert.match(webhookSource, /await typing\.finishWithReply/);
   assert.match(mindsSource, /timeoutMs: 18_000/);

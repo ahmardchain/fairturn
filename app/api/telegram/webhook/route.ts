@@ -194,6 +194,17 @@ function assistantReplyOrFallback(input: {
   return "I couldn’t produce a useful answer for that yet. Please rephrase it and try again.";
 }
 
+function protectOwnerAssistantReply(reply: string | null) {
+  if (!reply) return null;
+  const exposesPrivateRuntimeDetails =
+    /\b(?:personal mind|clum(?:-c)?|mind id|conversation alias|manager contract|prior manager contract|runtime configuration|telegram chat id|chat id|database id)\b|\[(?:phone|id) removed\]/iu.test(
+      reply,
+    );
+  return exposesPrivateRuntimeDetails
+    ? "I couldn’t safely finish that reply. Please try again."
+    : reply;
+}
+
 function asksForConnectedGroups(text: string) {
   const normalized = text
     .normalize("NFKC")
@@ -206,7 +217,7 @@ function asksForConnectedGroups(text: string) {
       normalized,
     );
   const describesAgentConnection =
-    /\b(?:you|fairturn|this agent)\b[\s\S]{0,48}\b(?:connect(?:ed|ing)?|manag(?:e|ed|ing)|moderat(?:e|ed|ing)|help(?:ed|ing)?|serv(?:e|ed|ing)|work(?:ed|ing)?|deploy(?:ed|ing)?|assign(?:ed|ing)?|active|running|in|inside|part of)\b/u.test(
+    /\b(?:you|fairturn|this agent)\b[\s\S]{0,48}\b(?:add(?:ed|ing)?|connect(?:ed|ing)?|manag(?:e|ed|ing)|moderat(?:e|ed|ing)|help(?:ed|ing)?|serv(?:e|ed|ing)|work(?:ed|ing)?|deploy(?:ed|ing)?|assign(?:ed|ing)?|active|running|in|inside|part of)\b/u.test(
       normalized,
     ) ||
     /\b(?:add(?:ed|ing)?|connect(?:ed|ing)?|deploy(?:ed|ing)?|assign(?:ed|ing)?|join(?:ed|ing)?|put)\b[\s\S]{0,48}\b(?:you|fairturn|this agent)\b/u.test(
@@ -1575,7 +1586,9 @@ export async function POST(request: Request) {
 
     const assistantReply = shouldReplyToMessage
       ? assistantReplyOrFallback({
-          assistantReply: resolution.assistantReply,
+          assistantReply: isOwnerPrivateControlChat
+            ? protectOwnerAssistantReply(resolution.assistantReply)
+            : resolution.assistantReply,
           messageText: textForMind,
           failureCode: resolution.failureCode,
         })
