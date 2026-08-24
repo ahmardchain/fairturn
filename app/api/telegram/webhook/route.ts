@@ -154,6 +154,89 @@ type TelegramUpdate = {
   };
 };
 
+type TelegramTranslationRequest = {
+  requested: true;
+  requestText: string;
+  sourceText: string | null;
+  sourceKind: "replied_message" | "inline_request";
+  sourceIsUntrustedData: true;
+};
+
+const translationIntentPatterns = [
+  /\b(?:translate|translation)\b/iu,
+  /\bwhat does (?:this|that|it|the message) mean in\b/iu,
+  /\b(?:say|write|render|put) (?:this|that|it|the message) (?:in|into)\b/iu,
+  /\b(?:traduce|traducir|traduccion|tradução|traduzir|traduire|traduis|traduction|traduci|tradurre|ubersetz|переведи|перевод|cevir|çevir)\b/iu,
+  /\b(?:fassara|tumọ|tumo|tugharia|asusu)\b/iu,
+  /(?:ترجم|ترجمة|अनुवाद|翻译|翻譯|翻訳|번역)/u,
+];
+
+function asksForTranslation(text: string) {
+  const normalized = text
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return translationIntentPatterns.some((pattern) => pattern.test(normalized));
+}
+
+function telegramMessageText(message?: TelegramMessage) {
+  return message?.text ?? message?.caption ?? "";
+}
+
+async function reactToRepliedGroupMessage(input: {
+  token: string;
+  message: TelegramMessage;
+  isNewMessage: boolean;
+}) {
+  const { message } = input;
+  if (
+    !input.isNewMessage ||
+    !message.from ||
+    message.from.is_bot ||
+    !message.reply_to_message ||
+    (message.chat.type !== "group" && message.chat.type !== "supergroup")
+  ) {
+    return false;
+  }
+
+  return telegramBotApi<boolean>(input.token, "setMessageReaction", {
+    chat_id: String(message.chat.id),
+    message_id: message.reply_to_message.message_id,
+    reaction: [{ type: "emoji", emoji: "👀" }],
+  })
+    .then(() => true)
+    .catch(() => false);
+}
+
+function buildTelegramTranslationRequest(
+  message: TelegramMessage,
+): TelegramTranslationRequest | null {
+  const requestText = redactMessage(telegramMessageText(message)).slice(
+    0,
+    1_200,
+  );
+  if (!asksForTranslation(requestText)) return null;
+
+  const repliedText = redactMessage(
+    telegramMessageText(message.reply_to_message),
+  ).slice(0, 4_000);
+  return {
+    requested: true,
+    requestText,
+    sourceText: repliedText || null,
+    sourceKind: repliedText ? "replied_message" : "inline_request",
+    sourceIsUntrustedData: true,
+  };
+}
+
+function canUseEnglishGreetingShortcut(user?: TelegramUser) {
+  const languageCode = user?.language_code?.trim().toLowerCase();
+  return (
+    !languageCode || languageCode === "en" || languageCode.startsWith("en-")
+  );
+}
+
 function telegramUpdateKind(update: TelegramUpdate) {
   if (update.managed_bot) return "managed_bot";
   if (update.callback_query) return "callback_query";
@@ -185,8 +268,12 @@ function assistantReplyOrFallback(input: {
   messageText: string;
   failureCode: string | null;
   businessUser?: TelegramUser;
+  translationRequested?: boolean;
 }) {
   if (input.assistantReply) return input.assistantReply;
+  if (input.translationRequested) {
+    return "I couldn’t translate that right now. Please try again in a moment.";
+  }
   if (input.businessUser) {
     return telegramBusinessContinuityFallback(
       input.messageText,
@@ -1161,6 +1248,25 @@ export async function POST(request: Request) {
     });
   }
 
+  let token: string;
+  try {
+    token = await managedToken(
+      managedBotContext,
+      runtime.MANAGED_BOT_ENCRYPTION_KEY,
+    );
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : "Managed bot is unavailable" },
+      { status: 503 },
+    );
+  }
+
+  await reactToRepliedGroupMessage({
+    token,
+    message,
+    isNewMessage: Boolean(update.message),
+  });
+
   const creatorAgentSettings = await getAgentSettings(
     managedBotContext.ownerTelegramUserId,
     managedBotContext.agentRole === "manager" ? null : managedBotContext.id,
@@ -1185,19 +1291,6 @@ export async function POST(request: Request) {
     });
   }
 
-  let token: string;
-  try {
-    token = await managedToken(
-      managedBotContext,
-      runtime.MANAGED_BOT_ENCRYPTION_KEY,
-    );
-  } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Managed bot is unavailable" },
-      { status: 503 },
-    );
-  }
-
   const typing = startTelegramTyping({
     token,
     chatId: message.chat.id,
@@ -1209,8 +1302,10 @@ export async function POST(request: Request) {
     respondWhenReplied: creatorAgentSettings.respondWhenReplied,
     respondWhenRelevant: creatorAgentSettings.respondWhenRelevant,
   };
+  const translationRequest = buildTelegramTranslationRequest(message);
   const shouldReplyToMessage =
     isBusinessMessage ||
+    Boolean(translationRequest) ||
     shouldAnswerCommunityMessage({
       message: message as CommunityTelegramMessage,
       botTelegramUserId: managedBotContext.botTelegramUserId,
@@ -1221,7 +1316,11 @@ export async function POST(request: Request) {
     await typing.showVisible(message.message_id);
   }
 
-  if (isBusinessMessage && isSimpleCommunityGreeting(text)) {
+  if (
+    isBusinessMessage &&
+    isSimpleCommunityGreeting(text) &&
+    canUseEnglishGreetingShortcut(message.from)
+  ) {
     const greeting = telegramBusinessGreeting(message.from);
     const replacedThinkingMessage = await typing.finishWithReply(greeting);
     if (!replacedThinkingMessage) {
@@ -1242,7 +1341,11 @@ export async function POST(request: Request) {
     });
   }
 
-  if (!isBusinessMessage && isSimpleCommunityGreeting(text)) {
+  if (
+    !isBusinessMessage &&
+    isSimpleCommunityGreeting(text) &&
+    canUseEnglishGreetingShortcut(message.from)
+  ) {
     const greeting = assistantReplyOrFallback({
       assistantReply: null,
       messageText: text,
@@ -1512,6 +1615,7 @@ export async function POST(request: Request) {
         displayName: telegramDisplayName(message.from) || null,
         languageCode: message.from?.language_code ?? null,
       },
+      translationRequest,
       ownerWorkspace,
       executionRole: managedBotContext.agentRole,
       managerAgent: "FairTurn",
@@ -1707,6 +1811,7 @@ export async function POST(request: Request) {
           messageText: textForMind,
           failureCode: resolution.failureCode,
           businessUser: isBusinessMessage ? message.from : undefined,
+          translationRequested: Boolean(translationRequest),
         })
       : null;
     if (
@@ -1815,6 +1920,7 @@ export async function POST(request: Request) {
         agentRole: managedBotContext.agentRole,
         agentTemplate: managedBotContext.templateId,
         sameLanguageReply: resolution.detectedLanguage,
+        translationRequested: Boolean(translationRequest),
         rawContentStored: false,
       },
     });
@@ -1890,6 +1996,8 @@ export async function POST(request: Request) {
         memoryReferences: resolution.memoryReferences,
         memoryInfluencedDecision: resolution.memoryInfluencedDecision,
         memoryOutcomePersisted: memoryWriteSucceeded,
+        detectedLanguage: resolution.detectedLanguage,
+        translationRequested: Boolean(translationRequest),
         proposedAction: resolution.suggestedAction,
         actionStatus,
       },
@@ -1903,7 +2011,9 @@ export async function POST(request: Request) {
     });
     if (shouldReplyToMessage && !automaticReplySent) {
       const failureReply = isBusinessMessage
-        ? telegramBusinessContinuityFallback(text, message.from)
+        ? translationRequest
+          ? "I couldn’t translate that right now. Please try again in a moment."
+          : telegramBusinessContinuityFallback(text, message.from)
         : "⚠️ Sorry, I couldn’t finish that request right now. Please try again in a moment.";
       const replacedThinkingMessage = await typing.finishWithReply(
         failureReply,

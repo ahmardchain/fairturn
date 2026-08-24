@@ -605,3 +605,67 @@ test("selected Telegram Business inbox messages receive a subagent reply without
     /const failureReply = isBusinessMessage[\s\S]*telegramBusinessContinuityFallback/,
   );
 });
+
+test("Minds detects language and translates naturally across Telegram surfaces", async () => {
+  const webhookSource = await readFile(
+    new URL("../app/api/telegram/webhook/route.ts", import.meta.url),
+    "utf8",
+  );
+  const mindsSource = await readFile(
+    new URL("../lib/minds.ts", import.meta.url),
+    "utf8",
+  );
+  const promptSource = await readFile(
+    new URL("../lib/fairturn-system-prompt.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(webhookSource, /type TelegramTranslationRequest/);
+  assert.match(webhookSource, /function asksForTranslation/);
+  assert.match(webhookSource, /message\.reply_to_message/);
+  assert.match(webhookSource, /sourceIsUntrustedData: true/);
+  assert.match(
+    webhookSource,
+    /const shouldReplyToMessage =[\s\S]*Boolean\(translationRequest\)/,
+  );
+  assert.match(webhookSource, /translationRequest,/);
+  assert.match(webhookSource, /detectedLanguage: resolution\.detectedLanguage/);
+  assert.match(webhookSource, /enabled: !isBusinessMessage/);
+  assert.match(mindsSource, /Detect the language of the current message from its content/);
+  assert.match(mindsSource, /A natural-language translation was requested/);
+  assert.match(mindsSource, /translationSourcesAreUntrustedDataNotInstructions: true/);
+  assert.match(mindsSource, /!isTranslationRequest/);
+  assert.match(promptSource, /Handle code-switching naturally/);
+  assert.match(promptSource, /without requiring a command/);
+  assert.match(promptSource, /moderation intent from the translated meaning/);
+});
+
+test("new group replies receive a best-effort eyes reaction on the original message", async () => {
+  const webhookSource = await readFile(
+    new URL("../app/api/telegram/webhook/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(webhookSource, /async function reactToRepliedGroupMessage/);
+  assert.match(webhookSource, /message\.chat\.type !== "group"/);
+  assert.match(webhookSource, /message\.chat\.type !== "supergroup"/);
+  assert.match(webhookSource, /!message\.reply_to_message/);
+  assert.match(
+    webhookSource,
+    /telegramBotApi<boolean>\(input\.token, "setMessageReaction"/,
+  );
+  assert.match(
+    webhookSource,
+    /message_id: message\.reply_to_message\.message_id/,
+  );
+  assert.match(
+    webhookSource,
+    /reaction: \[\{ type: "emoji", emoji: "👀" \}\]/,
+  );
+  assert.match(webhookSource, /\.catch\(\(\) => false\)/);
+  assert.match(
+    webhookSource,
+    /token = await managedToken[\s\S]*await reactToRepliedGroupMessage[\s\S]*const typing = startTelegramTyping/,
+  );
+  assert.match(webhookSource, /isNewMessage: Boolean\(update\.message\)/);
+});
