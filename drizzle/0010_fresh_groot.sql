@@ -1,0 +1,1 @@
+ALTER TABLE `agent_settings` ADD `welcome_message` text DEFAULT '' NOT NULL;
