@@ -2,11 +2,9 @@
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ahmardchain/fairturn)
 
-FairTurn is a privacy-first AI teammate for global creator communities. It
-helps a community share moderation work fairly, protect each moderator’s stated
-boundaries, surface high-value creator opportunities, resolve ambiguous policy
-decisions, and close follow-ups without turning private conversations into a
-surveillance archive.
+What is FairTurn?
+FairTurn is a persistent AI teammate for creator communities that doesn't just moderate messages — it helps run the human system behind the community.
+Creator communities grow fast. But as engagement increases, so do scams, harassment, moderator burnout, missed opportunities, inconsistent decisions, unanswered questions, and overwhelming conversations.
 
 The main **FairTurn agent** and its creator-owned **subagent** both provide the
 complete moderation and community-assistant feature set. FairTurn additionally
@@ -14,35 +12,7 @@ manages the subagent lifecycle. The subagent has isolated identity, settings,
 memory, groups, knowledge, tasks, and audit history—and it alone may connect to
 Telegram Business for only the private chats its verified owner selects.
 
-## The winning demo loop
 
-1. FairTurn triages 74 noisy conversations and rescues a $2,500 partnership.
-2. A member reports a graphic threat in the community.
-3. FairTurn checks the Moderator Pact and does not expose the case to Maya,
-   whose boundary excludes graphic threats and harassment evidence.
-4. The case routes to David, an eligible safety moderator.
-5. An ambiguous phrase opens a Decision Huddle instead of being guessed.
-6. The human team approves a clarified Pact v4.
-7. A later comparable message retrieves that creator correction, and the Mind
-   cites the persistent memory ID that changed its recommendation.
-8. FairTurn schedules a creator spotlight, creates a timed native poll, reports
-   its poll/message IDs and non-anonymous voter choices in chat, while a
-   giveaway winner draw stops at a human approval checkpoint.
-9. FairTurn schedules a privacy-minimal follow-up and records the reasoning.
-10. An obvious wallet-drainer link is deleted automatically, the sender is
-    warned, and a repeat offense is muted for one hour while every decision is
-    preserved in the audit trail.
-11. A non-admin copies an administrator's display identity and uses new wording
-    to push members into a fake private verification flow. FairTurn combines
-    Telegram identity evidence with Minds intent analysis, deletes the message,
-    restricts the impersonator indefinitely, and DMs the creator a safe evidence
-    report without reproducing the scam link.
-12. FairTurn detects a hostile argument from conversational context, asks the
-    participants to stop, and applies a one-hour mute only if hostility continues
-    after the recorded intervention.
-
-The interactive demo always labels simulated data. No screen claims a live
-Telegram or Minds connection until its runtime credentials are present.
 
 ## Why this is different
 
