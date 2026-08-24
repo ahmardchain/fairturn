@@ -466,7 +466,7 @@ test("manager and subagent share community abilities while inbox automation stay
   assert.match(executionSource, /getFairTurnAgentToken/);
 });
 
-test("Telegram conversations remain attached and always settle visible thinking feedback", async () => {
+test("Telegram conversations settle visible thinking feedback outside Business inboxes", async () => {
   const workerSource = await readFile(
     new URL("../worker/index.ts", import.meta.url),
     "utf8",
@@ -502,9 +502,11 @@ test("Telegram conversations remain attached and always settle visible thinking 
   assert.match(typingSource, /setInterval\([\s\S]*2_000/);
   assert.match(typingSource, /finishWithReply/);
   assert.match(typingSource, /async cleanup\(\)/);
+  assert.match(typingSource, /const enabled = input\.enabled !== false/);
   assert.match(runtimeSource, /isSimpleCommunityGreeting/);
   assert.match(webhookSource, /assistantReplyOrFallback/);
   assert.match(webhookSource, /await typing\.showVisible/);
+  assert.match(webhookSource, /enabled: !isBusinessMessage/);
   assert.match(webhookSource, /accepted: "simple_greeting"/);
   assert.match(webhookSource, /accepted: "owner_group_lookup"/);
   assert.match(webhookSource, /eq\(communities\.managedBotId, managedBotContext\.id\)/);
@@ -572,6 +574,8 @@ test("selected Telegram Business inbox messages receive a subagent reply without
   );
   assert.match(typingSource, /business_connection_id: input\.businessConnectionId/);
   assert.match(typingSource, /"sendChatAction"[\s\S]*action: "typing"/);
+  assert.match(typingSource, /if \(!enabled \|\| visibleClosed\) return false/);
+  assert.match(webhookSource, /enabled: !isBusinessMessage/);
   assert.match(promptSource, /write as the creator's delegated assistant/);
   assert.match(promptSource, /do not announce a bot username, say “bot here,”/);
   assert.match(promptSource, /Never falsely claim to be the creator or a human/);

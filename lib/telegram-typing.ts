@@ -11,7 +11,9 @@ export function startTelegramTyping(input: {
   token: string;
   chatId: string | number;
   businessConnectionId?: string;
+  enabled?: boolean;
 }) {
+  const enabled = input.enabled !== false;
   let stopped = false;
   let visibleClosed = false;
   let visibleMessageId: number | null = null;
@@ -23,7 +25,7 @@ export function startTelegramTyping(input: {
     : {};
 
   const send = () => {
-    if (stopped) return;
+    if (!enabled || stopped) return;
     void telegramBotApi<boolean>(input.token, "sendChatAction", {
       chat_id: String(input.chatId),
       action: "typing",
@@ -50,12 +52,12 @@ export function startTelegramTyping(input: {
   };
 
   // Fire before any Minds, memory, or classification work.
-  send();
-  const interval = setInterval(send, 4_000);
+  if (enabled) send();
+  const interval = enabled ? setInterval(send, 4_000) : null;
 
   return {
     async showVisible(replyToMessageId?: number) {
-      if (visibleClosed) return false;
+      if (!enabled || visibleClosed) return false;
       visiblePromise ??= telegramBotApi<TelegramSentMessage>(
         input.token,
         "sendMessage",
@@ -92,7 +94,7 @@ export function startTelegramTyping(input: {
 
     async finishWithReply(text: string) {
       stopped = true;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
       visibleClosed = true;
       stopVisibleInterval();
       const messageId = visibleMessageId ?? (await visiblePromise);
@@ -118,7 +120,7 @@ export function startTelegramTyping(input: {
 
     async cleanup() {
       stopped = true;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
       visibleClosed = true;
       stopVisibleInterval();
       const messageId = visibleMessageId ?? (await visiblePromise);
@@ -130,7 +132,7 @@ export function startTelegramTyping(input: {
     stop() {
       if (stopped) return;
       stopped = true;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
     },
   };
 }

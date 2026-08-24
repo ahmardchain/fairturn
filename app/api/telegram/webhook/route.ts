@@ -1167,6 +1167,7 @@ export async function POST(request: Request) {
     token,
     chatId: message.chat.id,
     businessConnectionId: message.business_connection_id,
+    enabled: !isBusinessMessage,
   });
   const responsePreferences = {
     respondWhenTagged: creatorAgentSettings.respondWhenTagged,
