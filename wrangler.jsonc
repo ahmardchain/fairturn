@@ -15,6 +15,7 @@
   "assets": {
     "directory": "dist/client"
   },
+  // Cloudflare provisions the bound storage resources during a fresh deploy.
   "d1_databases": [
     {
       "binding": "DB",
