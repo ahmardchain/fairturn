@@ -207,6 +207,8 @@ export async function executeModerationPlan(input: {
     const actionId = crypto.randomUUID();
     const now = new Date().toISOString();
     if (planned.action === "route_to_human") {
+      const pendingAction =
+        input.verdict.severity === "severe" ? "ban" : "warn";
       await db.insert(moderationActions).values({
         id: actionId,
         communityId: input.communityId,
@@ -215,7 +217,7 @@ export async function executeModerationPlan(input: {
         chatId: input.chatId,
         targetUserId: input.targetUserId,
         messageId: input.messageId,
-        action: input.verdict.severity === "severe" ? "ban" : "warn",
+        action: pendingAction,
         reason: planned.reason.slice(0, 500),
         status: "pending",
         approvedByTelegramUserId: "awaiting_admin_confirmation",
@@ -227,6 +229,37 @@ export async function executeModerationPlan(input: {
         createdAt: now,
         updatedAt: now,
       });
+      const approvalText = [
+        "🧭 FairTurn needs your moderation decision",
+        `Group: ${redactMessage(input.chatTitle ?? input.chatId).slice(0, 120)}`,
+        `Member: ${redactMessage(input.targetDisplayName ?? input.targetUserId).slice(0, 80)}${input.targetUsername ? ` (@${redactMessage(input.targetUsername).slice(0, 64)})` : ""}`,
+        `Suggested action: ${pendingAction}`,
+        `Reason: ${redactMessage(planned.reason).slice(0, 500)}`,
+        "Approve to let the group agent apply it, or reject to take no action.",
+      ].join("\n");
+      await telegramBotApi<boolean>(
+        input.creatorAlertToken ?? input.token,
+        "sendMessage",
+        {
+          chat_id: input.ownerTelegramUserId,
+          text: approvalText.slice(0, 4_000),
+          disable_web_page_preview: true,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: "✅ Approve",
+                  callback_data: `ftmod:approve:${actionId}`,
+                },
+                {
+                  text: "❌ Reject",
+                  callback_data: `ftmod:reject:${actionId}`,
+                },
+              ],
+            ],
+          },
+        },
+      ).catch(() => {});
       results.push({ action: "route_to_human", status: "pending", automatic: false });
       continue;
     }

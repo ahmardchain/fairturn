@@ -4,9 +4,11 @@ import {
   agentCreationRequests,
   automationRuns,
   communities,
+  communityMembers,
   giveawayEntries,
   inboxItems,
   managedBots,
+  moderationActions,
   moderators,
   pacts,
   telegramUpdates,
@@ -28,6 +30,7 @@ import {
   fairTurnAgentCapabilities,
   findManagerAgentForChat,
   findManagerAgentForPoll,
+  getFairTurnAgentToken,
   memoryAgentId,
   type FairTurnAgentContext,
 } from "../../../../lib/agent-hierarchy";
@@ -79,7 +82,11 @@ import {
   type TelegramKnowledgeMessage,
 } from "../../../../lib/telegram-knowledge";
 import { startTelegramTyping } from "../../../../lib/telegram-typing";
-import { isTelegramAdministrator } from "../../../../lib/telegram-moderation";
+import {
+  executeTelegramModeration,
+  isTelegramAdministrator,
+  isTelegramModerationAction,
+} from "../../../../lib/telegram-moderation";
 import {
   applyTelegramPollAnswer,
   applyTelegramPollState,
@@ -261,6 +268,106 @@ function parseJsonRecord(value: string) {
   } catch {
     return {};
   }
+}
+
+type PrivateOnboardingPreferences = {
+  fairturnOnboarding?: {
+    state?: "awaiting_name" | "completed";
+    preferredName?: string;
+  };
+  [key: string]: unknown;
+};
+
+const FAIRTURN_FIRST_INTRO = [
+  "Hi! I'm Fairturn, your personal community moderation and assistant bot. 🤖",
+  "What can I call you?",
+  "I'm here to help you manage your group, keep things fair, and answer questions. Just let me know your name and we'll get started! ✨",
+].join("\n\n");
+
+function parsePrivateOnboardingPreferences(value?: string | null) {
+  if (!value) return {} as PrivateOnboardingPreferences;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object"
+      ? (parsed as PrivateOnboardingPreferences)
+      : ({} as PrivateOnboardingPreferences);
+  } catch {
+    return {} as PrivateOnboardingPreferences;
+  }
+}
+
+function isTelegramStart(text: string) {
+  return /^\/start(?:@[a-z0-9_]+)?(?:\s|$)/iu.test(text.trim());
+}
+
+function extractPreferredName(text: string) {
+  const candidate = redactMessage(text)
+    .normalize("NFKC")
+    .replace(
+      /^(?:(?:my name is|you can call me|call me|i am|i'm|im)\s+)/iu,
+      "",
+    )
+    .replace(/[.!?,;:]+$/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (
+    !candidate ||
+    candidate.length > 60 ||
+    candidate.split(/\s+/u).length > 5 ||
+    /[/?#@<>]/u.test(candidate) ||
+    !/^[\p{L}\p{M}][\p{L}\p{M}'’\-. ]*$/u.test(candidate)
+  ) {
+    return null;
+  }
+  return candidate;
+}
+
+async function getPrivateOnboardingProfile(telegramUserId: string) {
+  const db = await ensureDefaultWorkspace();
+  const [member] = await db
+    .select({ preferencesJson: communityMembers.preferencesJson })
+    .from(communityMembers)
+    .where(
+      and(
+        eq(communityMembers.communityId, DEFAULT_COMMUNITY_ID),
+        eq(communityMembers.telegramUserId, telegramUserId),
+      ),
+    )
+    .limit(1);
+  return parsePrivateOnboardingPreferences(member?.preferencesJson);
+}
+
+async function savePrivateOnboardingProfile(input: {
+  user: TelegramUser;
+  preferences: PrivateOnboardingPreferences;
+}) {
+  const db = await ensureDefaultWorkspace();
+  const telegramUserId = String(input.user.id);
+  const now = new Date().toISOString();
+  const preferencesJson = JSON.stringify(input.preferences);
+  await db
+    .insert(communityMembers)
+    .values({
+      id: `${DEFAULT_COMMUNITY_ID}:${telegramUserId}`,
+      communityId: DEFAULT_COMMUNITY_ID,
+      telegramUserId,
+      displayAlias: telegramDisplayName(input.user) || "Telegram user",
+      username: input.user.username,
+      preferencesJson,
+      lastSeenAt: now,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [communityMembers.communityId, communityMembers.telegramUserId],
+      set: {
+        displayAlias: telegramDisplayName(input.user) || "Telegram user",
+        username: input.user.username,
+        preferencesJson,
+        lastSeenAt: now,
+        updatedAt: now,
+      },
+    });
 }
 
 function assistantReplyOrFallback(input: {
@@ -881,6 +988,175 @@ export async function POST(request: Request) {
 
   if (update.callback_query) {
     const callback = update.callback_query;
+    const moderationMatch = callback.data?.match(
+      /^ftmod:(approve|reject):([0-9a-f-]{36})$/iu,
+    );
+    if (moderationMatch && callback.message && managedBotContext) {
+      const callbackToken = await managedToken(
+        managedBotContext,
+        runtime.MANAGED_BOT_ENCRYPTION_KEY,
+      );
+      const answerCallback = async (text: string, showAlert = false) => {
+        await telegramBotApi<boolean>(callbackToken, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text,
+          show_alert: showAlert,
+        }).catch(() => {});
+      };
+      const [pendingAction] = await db
+        .select({
+          id: moderationActions.id,
+          communityId: moderationActions.communityId,
+          managedBotId: moderationActions.managedBotId,
+          ownerTelegramUserId: moderationActions.ownerTelegramUserId,
+          chatId: moderationActions.chatId,
+          targetUserId: moderationActions.targetUserId,
+          messageId: moderationActions.messageId,
+          action: moderationActions.action,
+          reason: moderationActions.reason,
+          status: moderationActions.status,
+          telegramResultJson: moderationActions.telegramResultJson,
+          agentRole: managedBots.agentRole,
+          tokenCiphertext: managedBots.tokenCiphertext,
+          tokenIv: managedBots.tokenIv,
+        })
+        .from(moderationActions)
+        .innerJoin(managedBots, eq(moderationActions.managedBotId, managedBots.id))
+        .where(eq(moderationActions.id, moderationMatch[2]))
+        .limit(1);
+
+      if (
+        !pendingAction ||
+        pendingAction.ownerTelegramUserId !== String(callback.from.id)
+      ) {
+        await answerCallback("Only the creator can decide this.", true);
+        return Response.json({
+          ok: true,
+          accepted: false,
+          reason: "Moderation approval owner mismatch",
+        });
+      }
+      if (pendingAction.status !== "pending") {
+        await answerCallback("This decision has already been handled.", true);
+        return Response.json({
+          ok: true,
+          accepted: false,
+          reason: "Moderation decision already handled",
+        });
+      }
+
+      const decision = moderationMatch[1].toLowerCase() as
+        | "approve"
+        | "reject";
+      const now = new Date().toISOString();
+      const [claimed] = await db
+        .update(moderationActions)
+        .set({
+          status: decision === "approve" ? "approved_pending" : "rejected",
+          approvedByTelegramUserId: String(callback.from.id),
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(moderationActions.id, pendingAction.id),
+            eq(moderationActions.status, "pending"),
+          ),
+        )
+        .returning({ id: moderationActions.id });
+      if (!claimed) {
+        await answerCallback("This decision has already been handled.", true);
+        return Response.json({ ok: true, accepted: false, reason: "Decision race" });
+      }
+
+      const originalText =
+        callback.message.text?.slice(0, 3_700) ||
+        "FairTurn moderation decision";
+      const editDecisionMessage = async (result: string) => {
+        await telegramBotApi<boolean>(callbackToken, "editMessageText", {
+          chat_id: String(callback.message?.chat.id),
+          message_id: callback.message?.message_id,
+          text: `${originalText}\n\n${result}`,
+          reply_markup: { inline_keyboard: [] },
+          disable_web_page_preview: true,
+        }).catch(() => {});
+      };
+
+      if (decision === "reject") {
+        await answerCallback("Rejected. No action was taken.");
+        await editDecisionMessage("❌ Rejected by creator — no action taken.");
+        await writeAuditEvent({
+          communityId: pendingAction.communityId,
+          actorType: "telegram_creator",
+          actorId: String(callback.from.id),
+          action: "moderation_action_rejected",
+          subjectType: "moderation_action",
+          subjectId: pendingAction.id,
+          detail: { singleUseDecision: true },
+        });
+        return Response.json({ ok: true, accepted: "moderation_rejected" });
+      }
+
+      await answerCallback("Approved. FairTurn is applying the action.");
+      try {
+        if (!isTelegramModerationAction(pendingAction.action)) {
+          throw new Error("Unsupported moderation action");
+        }
+        const executionToken = await getFairTurnAgentToken({
+          agentRole: pendingAction.agentRole,
+          tokenCiphertext: pendingAction.tokenCiphertext,
+          tokenIv: pendingAction.tokenIv,
+          managerToken: runtime.TELEGRAM_BOT_TOKEN,
+          encryptionSecret: runtime.MANAGED_BOT_ENCRYPTION_KEY,
+        });
+        await executeTelegramModeration(executionToken, {
+          chatId: pendingAction.chatId,
+          targetUserId: pendingAction.targetUserId ?? undefined,
+          messageId: pendingAction.messageId ?? undefined,
+          action: pendingAction.action,
+          reason: pendingAction.reason,
+        });
+        await db
+          .update(moderationActions)
+          .set({ status: "executed", updatedAt: new Date().toISOString() })
+          .where(eq(moderationActions.id, pendingAction.id));
+        await editDecisionMessage(
+          `✅ Approved by creator — ${pendingAction.action} completed.`,
+        );
+        await writeAuditEvent({
+          communityId: pendingAction.communityId,
+          actorType: "telegram_creator",
+          actorId: String(callback.from.id),
+          action: "moderation_action_approved_and_executed",
+          subjectType: "moderation_action",
+          subjectId: pendingAction.id,
+          detail: {
+            managedBotId: pendingAction.managedBotId,
+            action: pendingAction.action,
+            singleUseDecision: true,
+          },
+        });
+        return Response.json({ ok: true, accepted: "moderation_approved" });
+      } catch (error) {
+        await db
+          .update(moderationActions)
+          .set({
+            status: "failed",
+            telegramResultJson: JSON.stringify({
+              error: error instanceof Error ? error.message : "Action failed",
+              previous: parseJsonRecord(pendingAction.telegramResultJson),
+            }),
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(moderationActions.id, pendingAction.id));
+        await editDecisionMessage(
+          "⚠️ Approved, but Telegram could not apply it. Check the agent's admin permissions.",
+        );
+        return Response.json({
+          ok: true,
+          accepted: "moderation_approval_failed",
+        });
+      }
+    }
     const roleMatch = callback.data?.match(
       /^fairturn_role:(creator|builder|member)$/iu,
     );
@@ -1291,6 +1567,97 @@ export async function POST(request: Request) {
     });
   }
 
+  let preferredPrivateName: string | null = null;
+  const isManagerPrivateChat =
+    !isBusinessMessage &&
+    message.chat.type === "private" &&
+    managedBotContext.agentRole === "manager" &&
+    Boolean(message.from);
+  if (isManagerPrivateChat && message.from) {
+    const onboardingPreferences = await getPrivateOnboardingProfile(
+      String(message.from.id),
+    );
+    const onboarding = onboardingPreferences.fairturnOnboarding;
+    preferredPrivateName = onboarding?.preferredName?.trim() || null;
+    const firstConversationTrigger =
+      isTelegramStart(text) ||
+      (isSimpleCommunityGreeting(text) &&
+        canUseEnglishGreetingShortcut(message.from));
+
+    if (onboarding?.state === "awaiting_name" && !firstConversationTrigger) {
+      const preferredName = extractPreferredName(text);
+      if (preferredName) {
+        await savePrivateOnboardingProfile({
+          user: message.from,
+          preferences: {
+            ...onboardingPreferences,
+            fairturnOnboarding: {
+              state: "completed",
+              preferredName,
+            },
+          },
+        });
+        await writeMemory({
+          ownerId: managedBotContext.ownerTelegramUserId,
+          agentId: memoryAgentId(managedBotContext),
+          scope: "private_inbox",
+          subjectId: String(message.chat.id),
+          kind: "preferred_name",
+          summary: `The user asked FairTurn to call them ${preferredName}.`,
+          metadata: { preferredName, userApproved: true },
+        });
+        const reply = [
+          `Nice to meet you, ${preferredName}! Let me show you what I can do...`,
+          "I can moderate your groups, answer community questions, summarize conversations, create polls and events, and manage your FairTurn agents. Just talk to me naturally 😊",
+        ].join("\n\n");
+        await telegramBotApi(token, "sendMessage", {
+          chat_id: String(message.chat.id),
+          text: reply,
+          reply_parameters: { message_id: message.message_id },
+        });
+        return Response.json({
+          ok: true,
+          accepted: "onboarding_name_saved",
+          automaticReplySent: true,
+        });
+      }
+    }
+
+    if (firstConversationTrigger && onboarding?.state !== "completed") {
+      await savePrivateOnboardingProfile({
+        user: message.from,
+        preferences: {
+          ...onboardingPreferences,
+          fairturnOnboarding: { state: "awaiting_name" },
+        },
+      });
+      await telegramBotApi(token, "sendMessage", {
+        chat_id: String(message.chat.id),
+        text: FAIRTURN_FIRST_INTRO,
+        reply_parameters: { message_id: message.message_id },
+      });
+      return Response.json({
+        ok: true,
+        accepted: "onboarding_started",
+        automaticReplySent: true,
+      });
+    }
+
+    if (isTelegramStart(text) && onboarding?.state === "completed") {
+      const reply = `Welcome back${preferredPrivateName ? `, ${preferredPrivateName}` : ""}! What would you like FairTurn to help with today?`;
+      await telegramBotApi(token, "sendMessage", {
+        chat_id: String(message.chat.id),
+        text: reply,
+        reply_parameters: { message_id: message.message_id },
+      });
+      return Response.json({
+        ok: true,
+        accepted: "onboarding_welcome_back",
+        automaticReplySent: true,
+      });
+    }
+  }
+
   const typing = startTelegramTyping({
     token,
     chatId: message.chat.id,
@@ -1346,11 +1713,13 @@ export async function POST(request: Request) {
     isSimpleCommunityGreeting(text) &&
     canUseEnglishGreetingShortcut(message.from)
   ) {
-    const greeting = assistantReplyOrFallback({
-      assistantReply: null,
-      messageText: text,
-      failureCode: null,
-    });
+    const greeting = preferredPrivateName
+      ? `Hi, ${preferredPrivateName} 👋 How can I help?`
+      : assistantReplyOrFallback({
+          assistantReply: null,
+          messageText: text,
+          failureCode: null,
+        });
     const replacedThinkingMessage = await typing.finishWithReply(greeting);
     if (!replacedThinkingMessage) {
       await telegramBotApi(token, "sendMessage", {
@@ -1612,7 +1981,8 @@ export async function POST(request: Request) {
           : "telegram_agent_direct",
       ownerPrivateControl: isOwnerPrivateControlChat,
       senderProfile: {
-        displayName: telegramDisplayName(message.from) || null,
+        displayName:
+          preferredPrivateName || telegramDisplayName(message.from) || null,
         languageCode: message.from?.language_code ?? null,
       },
       translationRequest,

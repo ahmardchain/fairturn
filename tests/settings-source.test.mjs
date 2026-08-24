@@ -669,3 +669,51 @@ test("new group replies receive a best-effort eyes reaction on the original mess
   );
   assert.match(webhookSource, /isNewMessage: Boolean\(update\.message\)/);
 });
+
+test("first private conversation asks for and remembers the user's chosen name", async () => {
+  const webhookSource = await readFile(
+    new URL("../app/api/telegram/webhook/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(webhookSource, /FAIRTURN_FIRST_INTRO/);
+  assert.match(webhookSource, /What can I call you\?/);
+  assert.match(webhookSource, /fairturnOnboarding/);
+  assert.match(webhookSource, /state: "awaiting_name"/);
+  assert.match(webhookSource, /state: "completed"/);
+  assert.match(
+    webhookSource,
+    /`Nice to meet you, \$\{preferredName\}! Let me show you what I can do\.\.\.`/,
+  );
+  assert.match(webhookSource, /kind: "preferred_name"/);
+  assert.match(
+    webhookSource,
+    /preferredPrivateName \|\| telegramDisplayName\(message\.from\) \|\| null/,
+  );
+});
+
+test("creator moderation decisions use single-use owner-only Telegram buttons", async () => {
+  const webhookSource = await readFile(
+    new URL("../app/api/telegram/webhook/route.ts", import.meta.url),
+    "utf8",
+  );
+  const runtimeSource = await readFile(
+    new URL("../lib/community-runtime.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(runtimeSource, /text: "✅ Approve"/);
+  assert.match(runtimeSource, /text: "❌ Reject"/);
+  assert.match(runtimeSource, /callback_data: `ftmod:approve:\$\{actionId\}`/);
+  assert.match(runtimeSource, /callback_data: `ftmod:reject:\$\{actionId\}`/);
+  assert.match(webhookSource, /Only the creator can decide this\./);
+  assert.match(
+    webhookSource,
+    /eq\(moderationActions\.status, "pending"\)/,
+  );
+  assert.match(webhookSource, /getFairTurnAgentToken\(/);
+  assert.match(webhookSource, /executeTelegramModeration\(executionToken/);
+  assert.match(webhookSource, /reply_markup: \{ inline_keyboard: \[\] \}/);
+  assert.match(webhookSource, /moderation_action_rejected/);
+  assert.match(webhookSource, /moderation_action_approved_and_executed/);
+});
