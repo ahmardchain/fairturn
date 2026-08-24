@@ -107,6 +107,7 @@ type TelegramMessage = {
   business_connection_id?: string;
   chat: { id: number; type: string; title?: string };
   from?: TelegramUser;
+  sender_business_bot?: TelegramUser;
   text?: string;
   caption?: string;
   photo?: TelegramPhotoSize[];
@@ -1052,6 +1053,25 @@ export async function POST(request: Request) {
         reason: "FairTurn has no active owner-matched Telegram Business connection",
       });
     }
+    if (update.edited_business_message) {
+      return Response.json({
+        ok: true,
+        accepted: false,
+        reason: "Edited Telegram Business messages do not trigger another automatic reply",
+      });
+    }
+    if (
+      !message.from ||
+      message.from.is_bot ||
+      message.sender_business_bot ||
+      String(message.from.id) === managedBotContext.ownerTelegramUserId
+    ) {
+      return Response.json({
+        ok: true,
+        accepted: false,
+        reason: "Outgoing Telegram Business messages do not trigger automatic replies",
+      });
+    }
   } else if (
     !managedBotContext ||
     !managedAgentCanModerate(managedBotContext.templateId)
@@ -1133,7 +1153,7 @@ export async function POST(request: Request) {
     respondWhenRelevant: creatorAgentSettings.respondWhenRelevant,
   };
   const shouldReplyToMessage =
-    !isBusinessMessage &&
+    isBusinessMessage ||
     shouldAnswerCommunityMessage({
       message: message as CommunityTelegramMessage,
       botTelegramUserId: managedBotContext.botTelegramUserId,
@@ -1594,7 +1614,6 @@ export async function POST(request: Request) {
         })
       : null;
     if (
-      !isBusinessMessage &&
       !effectiveVerdict.flagged &&
       assistantReply &&
       shouldReplyToMessage
@@ -1607,6 +1626,9 @@ export async function POST(request: Request) {
           chat_id: String(message.chat.id),
           text: assistantReply,
           reply_parameters: { message_id: message.message_id },
+          ...(message.business_connection_id
+            ? { business_connection_id: message.business_connection_id }
+            : {}),
         });
       }
       automaticReplySent = true;
@@ -1794,6 +1816,9 @@ export async function POST(request: Request) {
           chat_id: String(message.chat.id),
           text: failureReply,
           reply_parameters: { message_id: message.message_id },
+          ...(message.business_connection_id
+            ? { business_connection_id: message.business_connection_id }
+            : {}),
         }).catch(() => {});
       }
     }

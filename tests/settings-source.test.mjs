@@ -533,3 +533,29 @@ test("Telegram conversations remain attached and always settle visible thinking 
   assert.match(systemPromptSource, /Never expose or mention internal database IDs/);
   assert.match(systemPromptSource, /must not override ownerWorkspace/);
 });
+
+test("selected Telegram Business inbox messages receive a subagent reply without loops", async () => {
+  const webhookSource = await readFile(
+    new URL("../app/api/telegram/webhook/route.ts", import.meta.url),
+    "utf8",
+  );
+  const typingSource = await readFile(
+    new URL("../lib/telegram-typing.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(webhookSource, /sender_business_bot\?: TelegramUser/);
+  assert.match(webhookSource, /Edited Telegram Business messages do not trigger another automatic reply/);
+  assert.match(webhookSource, /Outgoing Telegram Business messages do not trigger automatic replies/);
+  assert.match(webhookSource, /const shouldReplyToMessage =\s+isBusinessMessage \|\|/);
+  assert.match(
+    webhookSource,
+    /text: assistantReply,[\s\S]*business_connection_id: message\.business_connection_id/,
+  );
+  assert.match(
+    webhookSource,
+    /text: failureReply,[\s\S]*business_connection_id: message\.business_connection_id/,
+  );
+  assert.match(typingSource, /business_connection_id: input\.businessConnectionId/);
+  assert.match(typingSource, /"sendChatAction"[\s\S]*action: "typing"/);
+});
