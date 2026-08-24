@@ -498,6 +498,9 @@ test("Telegram conversations remain attached and always settle visible thinking 
   assert.match(webhookSource, /assistantReplyOrFallback/);
   assert.match(webhookSource, /await typing\.showVisible/);
   assert.match(webhookSource, /accepted: "simple_greeting"/);
+  assert.match(webhookSource, /accepted: "owner_group_lookup"/);
+  assert.match(webhookSource, /eq\(communities\.managedBotId, managedBotContext\.id\)/);
   assert.match(webhookSource, /await typing\.finishWithReply/);
   assert.match(mindsSource, /timeoutMs: 18_000/);
+  assert.match(mindsSource, /assistantReply must be a helpful non-null reply/);
 });

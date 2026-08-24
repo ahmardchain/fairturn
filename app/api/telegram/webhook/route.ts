@@ -3,6 +3,7 @@ import {
   agentRuns,
   agentCreationRequests,
   automationRuns,
+  communities,
   giveawayEntries,
   inboxItems,
   managedBots,
@@ -190,6 +191,31 @@ function assistantReplyOrFallback(input: {
     return "⚠️ Sorry, I couldn’t finish that request right now. Please try again in a moment.";
   }
   return "I couldn’t produce a useful answer for that yet. Please rephrase it and try again.";
+}
+
+function asksForConnectedGroups(text: string) {
+  const normalized = text.toLowerCase().replace(/[^a-z0-9\s]/gu, " ");
+  return (
+    /\b(?:which|what|show|list|where|how many)\b[\s\S]*\b(?:group|groups|community|communities)\b/u.test(
+      normalized,
+    ) &&
+    /\b(?:add|added|connect|connected|manage|managing|joined|in|to)\b/u.test(
+      normalized,
+    )
+  );
+}
+
+function connectedGroupsReply(groups: Array<{ name: string }>) {
+  if (groups.length === 0) {
+    return "This agent isn’t connected to any Telegram group yet.";
+  }
+  if (groups.length === 1) {
+    return `This agent is connected to: ${groups[0].name}.`;
+  }
+  return [
+    `This agent is connected to ${groups.length} Telegram groups:`,
+    ...groups.map((group) => `• ${group.name}`),
+  ].join("\n");
 }
 
 async function managedToken(
@@ -1089,6 +1115,43 @@ export async function POST(request: Request) {
       ok: true,
       accepted: "simple_greeting",
       automaticReplySent: true,
+    });
+  }
+
+  const isOwnerPrivateControlChat =
+    !isBusinessMessage &&
+    message.chat.type === "private" &&
+    String(message.from?.id ?? "") === managedBotContext.ownerTelegramUserId;
+  if (isOwnerPrivateControlChat && asksForConnectedGroups(text)) {
+    const connectedGroups = await db
+      .select({ name: communities.name })
+      .from(communities)
+      .where(
+        and(
+          eq(
+            communities.ownerTelegramUserId,
+            managedBotContext.ownerTelegramUserId,
+          ),
+          eq(communities.managedBotId, managedBotContext.id),
+        ),
+      )
+      .orderBy(desc(communities.createdAt))
+      .limit(50);
+    const reply = connectedGroupsReply(connectedGroups);
+    const replacedThinkingMessage = await typing.finishWithReply(reply);
+    if (!replacedThinkingMessage) {
+      await telegramBotApi(token, "sendMessage", {
+        chat_id: String(message.chat.id),
+        text: reply,
+        reply_parameters: { message_id: message.message_id },
+      });
+    }
+    await typing.cleanup();
+    return Response.json({
+      ok: true,
+      accepted: "owner_group_lookup",
+      automaticReplySent: true,
+      connectedGroups: connectedGroups.length,
     });
   }
   await ensureConversationalBotInterface({
