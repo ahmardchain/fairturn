@@ -13,7 +13,7 @@
     "test": "npm run build && node --test tests/*.test.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .wrangler --ignore-pattern .sites-runtime --ignore-pattern outputs --ignore-pattern work",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
-    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "db:migrate:remote": "node scripts/migrate-d1-remote.mjs",
     "deploy": "wrangler deploy && npm run db:migrate:remote",
     "proof:minds": "node scripts/proof-minds.mjs"
   },

@@ -209,9 +209,10 @@ npm run build
 npm run deploy
 ```
 
-When deploying manually, first replace the placeholder D1 resource ID in
-`wrangler.jsonc` with your database ID (the one-click flow does this
-automatically), then configure secrets with `wrangler secret put`.
+During deployment, Wrangler provisions the account-specific D1 resource and
+FairTurn's migration script discovers its UUID before applying migrations. The
+public repository therefore never hard-codes one Cloudflare account's database
+ID. Configure production secrets with `wrangler secret put` or the dashboard.
 
 FairTurn uses the official `@animocabrands/minds-client-lib`. The library owns
 the fixed Builder API endpoint and canonical `X-Api-Key` authentication. For

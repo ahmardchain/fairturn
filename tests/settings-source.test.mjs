@@ -11,6 +11,14 @@ test("Cloudflare build config leaves resource IDs to automatic provisioning", as
     new URL("../wrangler.jsonc", import.meta.url),
     "utf8",
   );
+  const packageSource = await readFile(
+    new URL("../package.json", import.meta.url),
+    "utf8",
+  );
+  const migrationSource = await readFile(
+    new URL("../scripts/migrate-d1-remote.mjs", import.meta.url),
+    "utf8",
+  );
 
   for (const source of [viteSource, wranglerSource]) {
     assert.doesNotMatch(source, /00000000-0000-4000-8000-000000000000/);
@@ -20,6 +28,10 @@ test("Cloudflare build config leaves resource IDs to automatic provisioning", as
 
   assert.doesNotMatch(viteSource, /database_id/);
   assert.doesNotMatch(viteSource, /bucket_name/);
+  assert.match(packageSource, /node scripts\/migrate-d1-remote\.mjs/);
+  assert.match(migrationSource, /\["d1", "list", "--json"\]/);
+  assert.match(migrationSource, /database_id: databaseId/);
+  assert.match(migrationSource, /"migrations",\s*"apply"/);
 });
 
 test("Minds is a verified core runtime rather than an environment-string badge", async () => {
