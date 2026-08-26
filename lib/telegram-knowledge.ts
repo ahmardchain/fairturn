@@ -64,6 +64,20 @@ export function parseKnowledgeInstruction(
   const text = conversation.text;
 
   if (conversation.directed) {
+    // A short delete/remove instruction made while replying to a Telegram
+    // message is a moderation request, never a request to erase knowledge.
+    // The moderation router normally consumes it first; this guard prevents a
+    // missing/stale bot username from turning "@FairturnBot delete this" into
+    // a destructive knowledge action.
+    if (
+      message.reply_to_message &&
+      /^(?:delete|remove|take\s+down)(?:\s+(?:this|that|it|the)(?:\s+(?:message|post|text))?)?[?.!]*$/iu.test(
+        text,
+      )
+    ) {
+      return null;
+    }
+
     if (
       /^(?:(?:show|tell|list)(?:\s+me)?\s+(?:(?:everything\s+)?(?:that\s+)?(?:you\s+)?(?:know|remember|learned|saved)|what\s+you\s+(?:know|remember)|(?:your|the\s+community)\s+(?:memory|knowledge|saved\s+sources))|what\s+(?:do|have)\s+you\s+(?:know|remember|learned|saved))(?:\s+(?:about|for)\s+this\s+community)?[?.!]*$/iu.test(
         text,
