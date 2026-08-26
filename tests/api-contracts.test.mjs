@@ -32,7 +32,7 @@ test("reports honest integration and safety status", async () => {
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.product, "FairTurn");
-  assert.equal(payload.runtimeVersion, "2026-08-26.2");
+  assert.equal(payload.runtimeVersion, "2026-08-26.3");
   assert.equal(payload.integrations.telegram, false);
   assert.equal(payload.integrations.managedBots, false);
   assert.equal(payload.integrations.minds, false);
