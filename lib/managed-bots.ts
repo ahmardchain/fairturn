@@ -109,6 +109,38 @@ export const FAIRTURN_TELEGRAM_ALLOWED_UPDATES = [
 ] as const;
 
 export const FAIRTURN_OPEN_APP_LABEL = "Open App";
+export const FAIRTURN_PUBLIC_APP_ORIGIN =
+  "https://fairturn.ahmardchain.chatgpt.site";
+export const FAIRTURN_PUBLIC_WEBHOOK_ORIGIN =
+  "https://fairturn.ahmardchain.workers.dev";
+
+function isLocalTelegramRuntimeOrigin(url: URL) {
+  return url.hostname === "localhost" || url.hostname === "127.0.0.1";
+}
+
+export function fairTurnMiniAppOrigin(requestOrigin: string) {
+  const origin = new URL(requestOrigin);
+  if (isLocalTelegramRuntimeOrigin(origin)) return origin.origin;
+  if (
+    origin.hostname.endsWith(".workers.dev") ||
+    origin.hostname.endsWith(".chatgpt.site")
+  ) {
+    return FAIRTURN_PUBLIC_APP_ORIGIN;
+  }
+  return origin.origin;
+}
+
+export function fairTurnTelegramWebhookOrigin(requestOrigin: string) {
+  const origin = new URL(requestOrigin);
+  if (isLocalTelegramRuntimeOrigin(origin)) return origin.origin;
+  if (
+    origin.hostname.endsWith(".workers.dev") ||
+    origin.hostname.endsWith(".chatgpt.site")
+  ) {
+    return FAIRTURN_PUBLIC_WEBHOOK_ORIGIN;
+  }
+  return origin.origin;
+}
 
 export function fairTurnMiniAppMenuButton(appUrl: string) {
   const url = new URL(appUrl);
@@ -319,6 +351,7 @@ export async function provisionManagedBot(input: {
   botId: number;
   botName: string;
   appOrigin: string;
+  webhookOrigin?: string;
   encryptionSecret: string;
 }) {
   const token = await telegramBotApi<string>(input.managerToken, "getManagedBotToken", {
@@ -329,7 +362,7 @@ export async function provisionManagedBot(input: {
   const webhookSecretHash = await hashWebhookSecret(webhookSecret);
 
   await telegramBotApi<boolean>(token, "setWebhook", {
-    url: `${input.appOrigin}/api/telegram/webhook`,
+    url: `${input.webhookOrigin ?? input.appOrigin}/api/telegram/webhook`,
     secret_token: webhookSecret,
     allowed_updates: FAIRTURN_TELEGRAM_ALLOWED_UPDATES,
     drop_pending_updates: false,
@@ -360,12 +393,14 @@ export async function ensureManagerBotRuntime(input: {
   token: string;
   botTelegramUserId: string;
   appOrigin: string;
+  webhookOrigin?: string;
   webhookSecret: string;
 }) {
-  const key = `${input.botTelegramUserId}:${input.appOrigin}`;
+  const webhookOrigin = input.webhookOrigin ?? input.appOrigin;
+  const key = `${input.botTelegramUserId}:${input.appOrigin}:${webhookOrigin}`;
   if (configuredManagerRuntimes.has(key)) return;
   await telegramBotApi<boolean>(input.token, "setWebhook", {
-    url: `${input.appOrigin}/api/telegram/webhook`,
+    url: `${webhookOrigin}/api/telegram/webhook`,
     secret_token: input.webhookSecret,
     allowed_updates: FAIRTURN_TELEGRAM_ALLOWED_UPDATES,
     drop_pending_updates: false,

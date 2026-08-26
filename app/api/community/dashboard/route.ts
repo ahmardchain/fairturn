@@ -10,7 +10,11 @@ import {
 } from "../../../../db/schema";
 import { authenticateTelegramRequest } from "../../../../lib/telegram-mini-app";
 import { ensureManagerAgent } from "../../../../lib/agent-hierarchy";
-import { ensureManagerBotRuntime } from "../../../../lib/managed-bots";
+import {
+  ensureManagerBotRuntime,
+  fairTurnMiniAppOrigin,
+  fairTurnTelegramWebhookOrigin,
+} from "../../../../lib/managed-bots";
 
 const DAY = 24 * 60 * 60 * 1_000;
 
@@ -39,7 +43,10 @@ export async function GET(request: Request) {
       await ensureManagerBotRuntime({
         token: managerToken,
         botTelegramUserId: managerContext.botTelegramUserId,
-        appOrigin: new URL(request.url).origin,
+        appOrigin: fairTurnMiniAppOrigin(new URL(request.url).origin),
+        webhookOrigin: fairTurnTelegramWebhookOrigin(
+          new URL(request.url).origin,
+        ),
         webhookSecret: auth.runtime.TELEGRAM_WEBHOOK_SECRET,
       }).catch(() => {});
     }

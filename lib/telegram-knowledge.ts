@@ -18,7 +18,10 @@ import {
   getTelegramDocumentBytes,
   type TelegramDocument,
 } from "./telegram-media";
-import { fairTurnConversation } from "./telegram-conversation";
+import {
+  fairTurnConversation,
+  isRepliedMessageDeletionRequest,
+} from "./telegram-conversation";
 import { isTelegramAdministrator } from "./telegram-moderation";
 import { writeAuditEvent, ensureTelegramCommunity } from "./workspace";
 
@@ -70,10 +73,11 @@ export function parseKnowledgeInstruction(
     // missing/stale bot username from turning "@FairturnBot delete this" into
     // a destructive knowledge action.
     if (
-      message.reply_to_message &&
-      /^(?:delete|remove|take\s+down)(?:\s+(?:this|that|it|the)(?:\s+(?:message|post|text))?)?[?.!]*$/iu.test(
-        text,
-      )
+      isRepliedMessageDeletionRequest({
+        message,
+        botUsername,
+        botTelegramUserId,
+      })
     ) {
       return null;
     }

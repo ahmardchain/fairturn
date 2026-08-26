@@ -6,6 +6,8 @@ import {
   createFairTurnAgentSuggestion,
   decryptManagedBotToken,
   ensureManagerBotRuntime,
+  fairTurnMiniAppOrigin,
+  fairTurnTelegramWebhookOrigin,
   getManagerBot,
   getTelegramProfilePhotoDataUrl,
 } from "../../../lib/managed-bots";
@@ -70,10 +72,13 @@ export async function GET(request: Request) {
         managerBot,
       }),
       auth.runtime.TELEGRAM_WEBHOOK_SECRET
-        ? ensureManagerBotRuntime({
+          ? ensureManagerBotRuntime({
             token: managerToken,
             botTelegramUserId: String(managerBot.id),
-            appOrigin: new URL(request.url).origin,
+            appOrigin: fairTurnMiniAppOrigin(new URL(request.url).origin),
+            webhookOrigin: fairTurnTelegramWebhookOrigin(
+              new URL(request.url).origin,
+            ),
             webhookSecret: auth.runtime.TELEGRAM_WEBHOOK_SECRET,
           })
         : Promise.resolve(),

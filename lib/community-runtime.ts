@@ -30,7 +30,10 @@ import {
   type PollCreationRequest,
 } from "./community-polls";
 import { DEFAULT_WELCOME_MESSAGE } from "./agent-defaults";
-import { fairTurnConversation } from "./telegram-conversation";
+import {
+  fairTurnConversation,
+  isRepliedMessageDeletionRequest,
+} from "./telegram-conversation";
 import { redactMessage } from "./triage";
 import { writeAuditEvent } from "./workspace";
 import type { AdminIdentityContext } from "./community-safety";
@@ -335,6 +338,8 @@ export async function executeModerationPlan(input: {
   let creatorAlertStatus: "not_required" | "sent" | "failed" =
     "not_required";
   if (input.creatorAlertRequired) {
+    const banActionId = crypto.randomUUID();
+    const decisionCreatedAt = new Date().toISOString();
     const matchedAdmin = input.adminIdentity?.closestAdmin;
     const actionSummary = results
       .filter((result) => result.action !== "creator_alert")
@@ -360,8 +365,33 @@ export async function executeModerationPlan(input: {
       `Minds intent: ${input.safetyAssessment?.intent ?? "scam_social_engineering"} (${Math.round((input.safetyAssessment?.confidence ?? input.verdict.confidence) * 100)}%)`,
       evidenceLines ? `Evidence:\n${evidenceLines}` : "Evidence: high-confidence hybrid identity and intent match",
       `Actions: ${actionSummary || "execution unavailable"}`,
+      "Decision: Approve to ban the sender permanently, or reject the ban. The one-hour safety mute remains until it expires.",
       "Safety note: FairTurn did not reproduce the suspected scam link.",
     ].join("\n");
+    await db.insert(moderationActions).values({
+      id: banActionId,
+      communityId: input.communityId,
+      managedBotId: input.managedBotId,
+      ownerTelegramUserId: input.ownerTelegramUserId,
+      chatId: input.chatId,
+      targetUserId: input.targetUserId,
+      messageId: input.messageId,
+      action: "ban",
+      reason: "Creator review of a high-confidence administrator impersonation scam.",
+      status: "pending",
+      approvedByTelegramUserId: "awaiting_creator_ban_decision",
+      telegramResultJson: JSON.stringify({
+        decisionKind: "impersonation_ban",
+        detector: "fairturn_anti_impersonation_shield",
+        rules: input.verdict.rules,
+        confidence: input.verdict.confidence,
+        automaticContainmentApplied: true,
+        containmentResults: results,
+        temporaryMuteSeconds: 3_600,
+      }),
+      createdAt: decisionCreatedAt,
+      updatedAt: decisionCreatedAt,
+    });
     try {
       await telegramBotApi<boolean>(
         input.creatorAlertToken ?? input.token,
@@ -370,16 +400,52 @@ export async function executeModerationPlan(input: {
           chat_id: input.ownerTelegramUserId,
           text: alert.slice(0, 4_000),
           disable_web_page_preview: true,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: "✅ Approve ban",
+                  callback_data: `ftmod:approve:${banActionId}`,
+                },
+                {
+                  text: "❌ Reject ban",
+                  callback_data: `ftmod:reject:${banActionId}`,
+                },
+              ],
+            ],
+          },
         },
       );
       creatorAlertStatus = "sent";
+      results.push({
+        action: "ban_approval",
+        status: "pending",
+        automatic: false,
+      });
       results.push({
         action: "creator_alert",
         status: "executed",
         automatic: true,
       });
-    } catch {
+    } catch (error) {
       creatorAlertStatus = "failed";
+      await db
+        .update(moderationActions)
+        .set({
+          status: "alert_failed",
+          telegramResultJson: JSON.stringify({
+            decisionKind: "impersonation_ban",
+            detector: "fairturn_anti_impersonation_shield",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Creator alert delivery failed",
+            containmentResults: results,
+            temporaryMuteSeconds: 3_600,
+          }),
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(moderationActions.id, banActionId));
       results.push({
         action: "creator_alert",
         status: "failed",
@@ -473,7 +539,7 @@ function parseDuration(value: string) {
 type CommunityConversationAction =
   | { type: "start" | "help" | "settings" | "rules" | "links" | "roles" }
   | { type: "report"; reason: string }
-  | { type: "mute" | "ban"; reason: string; durationSeconds?: number }
+  | { type: "delete" | "mute" | "ban"; reason: string; durationSeconds?: number }
   | { type: "poll_create"; request: PollCreationRequest }
   | { type: "poll_details"; explicitId?: string };
 
@@ -552,6 +618,16 @@ export function parseCommunityConversationAction(input: {
     return {
       type: "report",
       reason: report[1]?.trim() || "A member asked FairTurn to review this message.",
+    };
+  }
+
+  if (isRepliedMessageDeletionRequest(input)) {
+    const statedReason = text.match(/\b(?:because|for)\s+([\s\S]+)$/iu)?.[1];
+    return {
+      type: "delete",
+      reason:
+        statedReason?.trim() ||
+        "Administrator explicitly requested deletion of the replied-to message.",
     };
   }
 
@@ -719,7 +795,11 @@ export async function handleCommunityConversationAction(input: {
     return true;
   }
 
-  if (request.type === "mute" || request.type === "ban") {
+  if (
+    request.type === "delete" ||
+    request.type === "mute" ||
+    request.type === "ban"
+  ) {
     if (!input.message.from) return true;
     const isAdmin = await isTelegramAdministrator({
       token: input.token,
@@ -727,13 +807,21 @@ export async function handleCommunityConversationAction(input: {
       userId: input.message.from.id,
     });
     if (!isAdmin) {
-      await send("Only a group administrator can ask me to mute or ban a member.");
+      await send("Only a group administrator can ask me to delete, mute, or ban.");
+      return true;
+    }
+    const repliedMessageId = input.message.reply_to_message?.message_id;
+    if (request.type === "delete" && !repliedMessageId) {
+      await send("Reply to the message you want me to delete.");
       return true;
     }
     const targetUserId = input.message.reply_to_message?.from?.id
       ? String(input.message.reply_to_message.from.id)
       : undefined;
-    if (!targetUserId || targetUserId === input.botTelegramUserId) {
+    if (
+      request.type !== "delete" &&
+      (!targetUserId || targetUserId === input.botTelegramUserId)
+    ) {
       await send(
         `Reply to the member’s message and tell me naturally to ${request.type}${
           request.type === "mute" ? " them for a period" : " them"
@@ -752,9 +840,7 @@ export async function handleCommunityConversationAction(input: {
       ownerTelegramUserId: input.ownerTelegramUserId,
       chatId,
       targetUserId,
-      messageId: input.message.reply_to_message
-        ? String(input.message.reply_to_message.message_id)
-        : null,
+      messageId: repliedMessageId ? String(repliedMessageId) : null,
       action: request.type,
       reason: redactMessage(request.reason).slice(0, 500),
       status: "approved_pending",
@@ -766,6 +852,10 @@ export async function handleCommunityConversationAction(input: {
       await executeTelegramModeration(input.token, {
         chatId,
         targetUserId,
+        messageId:
+          request.type === "delete" && repliedMessageId
+            ? String(repliedMessageId)
+            : undefined,
         action: request.type,
         durationSeconds: duration,
         reason: `Admin-confirmed conversational ${request.type}: ${redactMessage(request.reason).slice(0, 240)}`,
@@ -774,13 +864,33 @@ export async function handleCommunityConversationAction(input: {
         .update(moderationActions)
         .set({ status: "executed", updatedAt: new Date().toISOString() })
         .where(eq(moderationActions.id, actionId));
-      await send(request.type === "mute" ? "🔇 Member muted." : "🚫 Member banned.");
-    } catch {
+      await send(
+        request.type === "delete"
+          ? "🗑️ Message deleted."
+          : request.type === "mute"
+            ? "🔇 Member muted."
+            : "🚫 Member banned.",
+      );
+    } catch (error) {
       await db
         .update(moderationActions)
         .set({ status: "failed", updatedAt: new Date().toISOString() })
         .where(eq(moderationActions.id, actionId));
-      await send("I could not execute that action. Check FairTurn's admin permissions.");
+      const telegramReason =
+        error instanceof Error ? error.message.toLowerCase() : "";
+      const permissionFailure =
+        /not enough rights|administrator rights|can't be deleted|cannot be deleted|not an administrator/iu.test(
+          telegramReason,
+        );
+      await send(
+        request.type === "delete"
+          ? permissionFailure
+            ? "I couldn’t delete that message because Telegram has not granted the required permission. Make FairTurn a group admin with Delete messages permission, then try again."
+            : "I couldn’t delete that message. It may be too old or already removed; check FairTurn’s Delete messages permission."
+          : permissionFailure
+            ? "Telegram blocked that action. Enable FairTurn’s Ban users / Restrict members administrator permission."
+            : "I could not execute that action. Check FairTurn's admin permissions.",
+      );
     }
     return true;
   }

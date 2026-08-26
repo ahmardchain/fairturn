@@ -17,6 +17,8 @@ import {
 import {
   decryptManagedBotToken,
   ensureConversationalBotInterface,
+  fairTurnMiniAppOrigin,
+  fairTurnTelegramWebhookOrigin,
   hashWebhookSecret,
   managedAgentCanManageInbox,
   managedAgentCanModerate,
@@ -517,7 +519,7 @@ function connectedGroupsReply(groups: Array<{ name: string }>) {
   ].join("\n");
 }
 
-const FAIRTURN_RUNTIME_VERSION = "2026-08-26.3";
+const FAIRTURN_RUNTIME_VERSION = "2026-08-26.4";
 
 function trustedContextualModerationReason(input: {
   action: string;
@@ -760,7 +762,10 @@ async function acceptManagedBotUpdate(
         managerToken: runtime.TELEGRAM_BOT_TOKEN,
         botId: update.bot.id,
         botName: update.bot.first_name,
-        appOrigin: new URL(request.url).origin,
+        appOrigin: fairTurnMiniAppOrigin(new URL(request.url).origin),
+        webhookOrigin: fairTurnTelegramWebhookOrigin(
+          new URL(request.url).origin,
+        ),
         encryptionSecret: runtime.MANAGED_BOT_ENCRYPTION_KEY,
       });
     } catch (error) {
@@ -1813,7 +1818,7 @@ export async function POST(request: Request) {
   await ensureConversationalBotInterface({
     token,
     botTelegramUserId: managedBotContext.botTelegramUserId,
-    appUrl: new URL(request.url).origin,
+    appUrl: fairTurnMiniAppOrigin(new URL(request.url).origin),
   }).catch(() => {});
 
   if (isCommunityMessage && message.new_chat_members?.length) {

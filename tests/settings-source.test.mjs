@@ -91,7 +91,7 @@ test("Anti-Impersonation Shield combines verified Telegram identity with Minds i
   assert.match(moderationSource, /planContextualSafetyOverride/);
   assert.match(
     moderationSource,
-    /hasStrongIdentitySimilarity[\s\S]*scam_social_engineering[\s\S]*confidence >= 0\.92/,
+    /hasStrongIdentitySimilarity[\s\S]*scam_social_engineering[\s\S]*confidence >= 0\.82/,
   );
   assert.match(
     moderationSource,
@@ -746,6 +746,9 @@ test("admin reply moderation runs before knowledge lookup and can delete the tar
   );
   assert.match(runtimeSource, /type: "delete"/);
   assert.match(conversationSource, /@fairturn\[a-z0-9_\]\*/);
+  assert.match(conversationSource, /isRepliedMessageDeletionRequest/);
+  assert.match(conversationSource, /masssage/);
+  assert.match(conversationSource, /memory\|knowledge\|source\|document\|file/);
   assert.match(runtimeSource, /request\.type === "delete"/);
   assert.match(knowledgeSource, /A short delete\/remove instruction/);
   assert.match(knowledgeSource, /message\.reply_to_message/);
@@ -760,4 +763,27 @@ test("admin reply moderation runs before knowledge lookup and can delete the tar
     webhookSource,
     /reason: resolution\.moderationRecommendation\.reason/,
   );
+});
+
+test("production Telegram webhooks stay on the current Worker while Open App stays on the Mini App", async () => {
+  const managedBotsSource = await readFile(
+    new URL("../lib/managed-bots.ts", import.meta.url),
+    "utf8",
+  );
+  const agentRouteSource = await readFile(
+    new URL("../app/api/agents/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    managedBotsSource,
+    /https:\/\/fairturn\.ahmardchain\.workers\.dev/,
+  );
+  assert.match(
+    managedBotsSource,
+    /https:\/\/fairturn\.ahmardchain\.chatgpt\.site/,
+  );
+  assert.match(managedBotsSource, /webhookOrigin \?\? input\.appOrigin/);
+  assert.match(agentRouteSource, /fairTurnTelegramWebhookOrigin/);
+  assert.match(agentRouteSource, /fairTurnMiniAppOrigin/);
 });

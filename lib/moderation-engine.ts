@@ -1,6 +1,7 @@
 export type ModerationRule =
   | "community_norm_violation"
   | "admin_impersonation_scam"
+  | "scam_social_engineering"
   | "heated_conflict"
   | "continued_conflict"
   | "crypto_scam"
@@ -235,7 +236,7 @@ export function planContextualSafetyOverride(input: {
       !input.adminIdentity.senderIsAdministrator &&
       input.adminIdentity.hasStrongIdentitySimilarity &&
       input.safetyAssessment.intent === "scam_social_engineering" &&
-      confidence >= 0.92 &&
+      confidence >= 0.82 &&
       identityConfidence >= 0.88,
   );
 
@@ -269,11 +270,58 @@ export function planContextualSafetyOverride(input: {
         {
           action: "mute",
           automatic: true,
-          durationSeconds: 0,
+          durationSeconds: 3_600,
           reason,
         },
       ],
       creatorAlertRequired: true,
+    };
+  }
+
+  const highConfidenceSocialEngineering = Boolean(
+    input.adminIdentity?.checked &&
+      !input.adminIdentity.senderIsAdministrator &&
+      input.safetyAssessment.intent === "scam_social_engineering" &&
+      confidence >= 0.94,
+  );
+
+  if (highConfidenceSocialEngineering) {
+    const reason =
+      "Minds detected high-confidence social-engineering intent from a non-admin member.";
+    return {
+      verdict: {
+        ...input.deterministicVerdict,
+        flagged: true,
+        rules: Array.from(
+          new Set([
+            ...input.deterministicVerdict.rules,
+            "scam_social_engineering" as const,
+          ]),
+        ),
+        severity: "high",
+        confidence,
+        reason,
+        immediateDeleteRecommended: true,
+        detector: "minds_contextual",
+        evidence: contextualEvidence,
+      },
+      plan: [
+        {
+          action: "delete",
+          automatic: true,
+          durationSeconds: null,
+          reason,
+        },
+        {
+          action: "mute",
+          automatic: true,
+          durationSeconds: 3_600,
+          reason,
+        },
+      ],
+      // Permanent bans remain a creator decision. Ban approval is requested
+      // only when Telegram also verifies resemblance to an administrator.
+      creatorAlertRequired: false,
     };
   }
 
