@@ -734,6 +734,10 @@ test("admin reply moderation runs before knowledge lookup and can delete the tar
     new URL("../lib/telegram-conversation.ts", import.meta.url),
     "utf8",
   );
+  const knowledgeSource = await readFile(
+    new URL("../lib/telegram-knowledge.ts", import.meta.url),
+    "utf8",
+  );
 
   assert.ok(
     webhookSource.indexOf("await handleCommunityConversationAction") <
@@ -743,6 +747,8 @@ test("admin reply moderation runs before knowledge lookup and can delete the tar
   assert.match(runtimeSource, /type: "delete"/);
   assert.match(conversationSource, /@fairturn\[a-z0-9_\]\*/);
   assert.match(runtimeSource, /request\.type === "delete"/);
+  assert.match(knowledgeSource, /A short delete\/remove instruction/);
+  assert.match(knowledgeSource, /message\.reply_to_message/);
   assert.match(runtimeSource, /messageId:[\s\S]*String\(repliedMessageId\)/);
   assert.match(runtimeSource, /Make FairTurn a group admin with Delete messages permission/);
   assert.match(webhookSource, /temporaryContainmentRemains: isImpersonationBanDecision/);
