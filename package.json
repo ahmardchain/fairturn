@@ -14,7 +14,7 @@
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .wrangler --ignore-pattern .sites-runtime --ignore-pattern outputs --ignore-pattern work",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
     "db:migrate:remote": "node scripts/migrate-d1-remote.mjs",
-    "deploy": "wrangler deploy && npm run db:migrate:remote",
+    "deploy": "wrangler deploy",
     "proof:minds": "node scripts/proof-minds.mjs"
   },
   "dependencies": {
