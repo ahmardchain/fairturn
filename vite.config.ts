@@ -1,31 +1,24 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
-import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
-
-const { d1, r2 } = hostingConfig;
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 const localBindingConfig = {
-  main: "../worker/index.ts",
+  main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
-  d1_databases: d1
-    ? [
-        {
-          binding: d1,
-          database_name: "fairturn-db",
-        },
-      ]
-    : [],
-  r2_buckets: r2
-    ? [
-        {
-          binding: r2,
-        },
-      ]
-    : [],
+  d1_databases: [
+    {
+      binding: "DB",
+      database_name: "fairturn-db",
+    },
+  ],
+  r2_buckets: [
+    {
+      binding: "BUCKET",
+    },
+  ],
 };
 
 export default defineConfig(async () => {
@@ -53,7 +46,7 @@ export default defineConfig(async () => {
         // Keep the Sites/local Vite build isolated from the public one-click
         // deployment config at the repository root. The latter points at the
         // completed Vinext bundle and is consumed by Wrangler after build.
-        configPath: "./.openai/wrangler.sites.jsonc",
+        configPath: "./wrangler.vite.jsonc",
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         inspectorPort: false,
         config: localBindingConfig,
