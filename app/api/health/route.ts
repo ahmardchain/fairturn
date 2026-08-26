@@ -2,6 +2,7 @@ import { getRuntimeEnv } from "../../../lib/runtime-env";
 import { getFairTurnMindConnection } from "../../../lib/minds-runtime";
 
 const FAIRTURN_RUNTIME_VERSION = "2026-08-26.2";
+// This marker also confirms that Cloudflare built the GitHub main branch.
 
 export async function GET() {
   const runtime = await getRuntimeEnv();
