@@ -50,7 +50,6 @@ import {
   executeModerationPlan,
   handleCommunityConversationAction,
   inspectMemberMessage,
-  maybePinAnnouncement,
   recordCommunityMessage,
   isSimpleCommunityGreeting,
   shouldAnswerCommunityMessage,
@@ -84,6 +83,7 @@ import {
   type TelegramKnowledgeMessage,
 } from "../../../../lib/telegram-knowledge";
 import { startTelegramTyping } from "../../../../lib/telegram-typing";
+import { repliedMessageModerationIntent } from "../../../../lib/telegram-conversation";
 import {
   executeTelegramModeration,
   isTelegramAdministrator,
@@ -197,6 +197,8 @@ async function reactToRepliedGroupMessage(input: {
   token: string;
   message: TelegramMessage;
   isNewMessage: boolean;
+  botUsername?: string;
+  botTelegramUserId?: string;
 }) {
   const { message } = input;
   if (
@@ -205,6 +207,19 @@ async function reactToRepliedGroupMessage(input: {
     message.from.is_bot ||
     !message.reply_to_message ||
     (message.chat.type !== "group" && message.chat.type !== "supergroup")
+  ) {
+    return false;
+  }
+
+  // The eyes reaction is useful for ordinary conversations, but a moderation
+  // command must go straight to execution. Reacting to a scam message while an
+  // admin asks FairTurn to delete it makes containment look like a mere flag.
+  if (
+    repliedMessageModerationIntent({
+      message,
+      botUsername: input.botUsername,
+      botTelegramUserId: input.botTelegramUserId,
+    })
   ) {
     return false;
   }
@@ -519,7 +534,7 @@ function connectedGroupsReply(groups: Array<{ name: string }>) {
   ].join("\n");
 }
 
-const FAIRTURN_RUNTIME_VERSION = "2026-08-26.4";
+const FAIRTURN_RUNTIME_VERSION = "2026-08-26.6";
 
 function trustedContextualModerationReason(input: {
   action: string;
@@ -1469,6 +1484,9 @@ export async function POST(request: Request) {
   const isBusinessMessage = Boolean(
     update.business_message || update.edited_business_message,
   );
+  const isNewMessageUpdate = Boolean(
+    update.business_message || update.message || update.channel_post,
+  );
   const isCommunityMessage =
     !isBusinessMessage && message.chat.type !== "private";
 
@@ -1583,7 +1601,9 @@ export async function POST(request: Request) {
   await reactToRepliedGroupMessage({
     token,
     message,
-    isNewMessage: Boolean(update.message),
+    isNewMessage: isNewMessageUpdate,
+    botUsername: managedBotContext.username,
+    botTelegramUserId: managedBotContext.botTelegramUserId,
   });
 
   const creatorAgentSettings = await getAgentSettings(
@@ -1612,6 +1632,7 @@ export async function POST(request: Request) {
 
   let preferredPrivateName: string | null = null;
   const isManagerPrivateChat =
+    isNewMessageUpdate &&
     !isBusinessMessage &&
     message.chat.type === "private" &&
     managedBotContext.agentRole === "manager" &&
@@ -1714,14 +1735,15 @@ export async function POST(request: Request) {
   };
   const translationRequest = buildTelegramTranslationRequest(message);
   const shouldReplyToMessage =
-    isBusinessMessage ||
-    Boolean(translationRequest) ||
-    shouldAnswerCommunityMessage({
-      message: message as CommunityTelegramMessage,
-      botTelegramUserId: managedBotContext.botTelegramUserId,
-      botUsername: managedBotContext.username,
-      preferences: responsePreferences,
-    });
+    isNewMessageUpdate &&
+    (isBusinessMessage ||
+      Boolean(translationRequest) ||
+      shouldAnswerCommunityMessage({
+        message: message as CommunityTelegramMessage,
+        botTelegramUserId: managedBotContext.botTelegramUserId,
+        botUsername: managedBotContext.username,
+        preferences: responsePreferences,
+      }));
   if (shouldReplyToMessage) {
     await typing.showVisible(message.message_id);
   }
@@ -1752,6 +1774,7 @@ export async function POST(request: Request) {
   }
 
   if (
+    isNewMessageUpdate &&
     !isBusinessMessage &&
     isSimpleCommunityGreeting(text) &&
     canUseEnglishGreetingShortcut(message.from)
@@ -1783,7 +1806,11 @@ export async function POST(request: Request) {
     !isBusinessMessage &&
     message.chat.type === "private" &&
     String(message.from?.id ?? "") === managedBotContext.ownerTelegramUserId;
-  if (isOwnerPrivateControlChat && asksForConnectedGroups(text)) {
+  if (
+    isNewMessageUpdate &&
+    isOwnerPrivateControlChat &&
+    asksForConnectedGroups(text)
+  ) {
     const connectedGroups = await db
       .select({ name: communities.name })
       .from(communities)
@@ -1855,6 +1882,7 @@ export async function POST(request: Request) {
     : null;
 
   if (
+    isNewMessageUpdate &&
     messageCommunityId &&
     (await handleCommunityConversationAction({
       token,
@@ -1874,7 +1902,11 @@ export async function POST(request: Request) {
     });
   }
 
-  if (!isBusinessMessage && managedAgentCanModerate(managedBotContext.templateId)) {
+  if (
+    isNewMessageUpdate &&
+    !isBusinessMessage &&
+    managedAgentCanModerate(managedBotContext.templateId)
+  ) {
     let knowledgeHandled = false;
     try {
       knowledgeHandled = await handleTelegramKnowledgeMessage({
@@ -1911,6 +1943,7 @@ export async function POST(request: Request) {
     const communityId = messageCommunityId ?? DEFAULT_COMMUNITY_ID;
 
     if (
+      isNewMessageUpdate &&
       !isBusinessMessage &&
       !isCommunityMessage &&
       (await handleCommunityConversationAction({
@@ -1926,15 +1959,6 @@ export async function POST(request: Request) {
     ) {
       return Response.json({ ok: true, accepted: "community_conversation_action" });
     }
-    if (isCommunityMessage) {
-      await maybePinAnnouncement({
-        token,
-        botUsername: managedBotContext.username,
-        botTelegramUserId: managedBotContext.botTelegramUserId,
-        message: message as CommunityTelegramMessage,
-      });
-    }
-
     const textForMind =
       text.trim() || "[A Telegram image was sent without a caption.]";
     const telegramUserId = message.from ? String(message.from.id) : null;
@@ -2235,11 +2259,25 @@ export async function POST(request: Request) {
       ];
     }
 
-    const moderationResults =
+    const shouldClaimAutomaticModeration =
       isCommunityMessage &&
       telegramUserId &&
       effectiveVerdict.flagged &&
-      !senderIsVerifiedAdministrator
+      !senderIsVerifiedAdministrator;
+    const [automaticModerationClaim] = shouldClaimAutomaticModeration
+      ? await db
+          .insert(telegramUpdates)
+          .values({
+            id: crypto.randomUUID(),
+            botScopeId: `fairturn_community_moderation:${message.chat.id}`,
+            updateId: `message:${message.message_id}`,
+            updateKind: "automatic_moderation_claim",
+          })
+          .onConflictDoNothing()
+          .returning({ id: telegramUpdates.id })
+      : [];
+    const moderationResults =
+      shouldClaimAutomaticModeration && automaticModerationClaim
         ? await executeModerationPlan({
             token,
             creatorAlertToken: runtime.TELEGRAM_BOT_TOKEN ?? token,

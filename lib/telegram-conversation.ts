@@ -28,8 +28,13 @@ export function fairTurnConversation(input: {
   // The runtime normally supplies the bot username. Keep a FairTurn-specific
   // fallback because Telegram can deliver an update before a freshly created
   // managed bot's username has been persisted locally.
-  const addressPatterns = ["@fairturn[a-z0-9_]*", "fairturn"];
-  if (username) addressPatterns.push(`@${escapeRegExp(username)}`);
+  // A group can contain the FairTurn manager and a creator subagent. Match the
+  // exact bot username whenever Telegram has supplied it so only the addressed
+  // agent owns the request. The fallback is used only during the short window
+  // before a newly provisioned bot username is persisted.
+  const addressPatterns = username
+    ? [`@${escapeRegExp(username)}`]
+    : ["@fairturnbot", "fairturn"];
   const address = new RegExp(
     `^(?:hi\\s+|hey\\s+|hello\\s+)?(?:${addressPatterns.join("|")})(?:\\s+agent)?[,:.!]?\\s*`,
     "iu",
@@ -51,6 +56,59 @@ export function fairTurnConversation(input: {
   };
 }
 
+export type RepliedMessageModerationIntent =
+  | "delete"
+  | "pin"
+  | "mute"
+  | "ban";
+
+/**
+ * Resolve explicit moderation requests that target the replied-to message or
+ * its sender. This is deliberately narrow: it requires a Telegram reply and a
+ * direct address to this exact bot, which prevents two FairTurn agents in the
+ * same group from both acting.
+ */
+export function repliedMessageModerationIntent(input: {
+  message: TelegramConversationMessage;
+  botUsername?: string;
+  botTelegramUserId?: string;
+}): RepliedMessageModerationIntent | null {
+  if (!input.message.reply_to_message) return null;
+  const conversation = fairTurnConversation(input);
+  if (!conversation.directed) return null;
+  const text = conversation.text;
+  if (!text || text.length > 240) return null;
+
+  if (
+    /\b(?:memory|knowledge|source|document|file|note|whitepaper|website)\b/iu.test(
+      text,
+    )
+  ) {
+    return null;
+  }
+  if (
+    /^(?:ban|kick(?:\s*out)?|remove\s+(?:(?:this|that|the)\s+)?(?:member|user|person)|remove\s+(?:him|her|them)\s+from\s+(?:the\s+)?group)\b/iu.test(
+      text,
+    )
+  ) {
+    return "ban";
+  }
+  if (/^(?:mute|silence|time\s*out|restrict)\b/iu.test(text)) {
+    return "mute";
+  }
+  if (
+    /^(?:pin|publish)\b|^make\s+(?:this|that|it)(?:\s+message)?\s+(?:an?\s+|the\s+)?announcement\b/iu.test(
+      text,
+    )
+  ) {
+    return "pin";
+  }
+  if (/^(?:delete|remove|take\s*down|erase)\b/iu.test(text)) {
+    return "delete";
+  }
+  return null;
+}
+
 /**
  * Telegram reply moderation is intentionally target-based: when an admin
  * replies to a message and asks FairTurn to delete/remove it, the replied-to
@@ -63,17 +121,5 @@ export function isRepliedMessageDeletionRequest(input: {
   botUsername?: string;
   botTelegramUserId?: string;
 }) {
-  if (!input.message.reply_to_message) return false;
-  const conversation = fairTurnConversation(input);
-  if (!conversation.directed) return false;
-  const text = conversation.text;
-  if (!/^(?:delete|remove|take\s*down|erase)\b/iu.test(text)) return false;
-  if (
-    /\b(?:memory|knowledge|source|document|file|note|whitepaper|website)\b/iu.test(
-      text,
-    )
-  ) {
-    return false;
-  }
-  return text.length <= 240;
+  return repliedMessageModerationIntent(input) === "delete";
 }

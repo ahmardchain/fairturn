@@ -32,7 +32,7 @@ test("reports honest integration and safety status", async () => {
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.product, "FairTurn");
-  assert.equal(payload.runtimeVersion, "2026-08-26.4");
+  assert.equal(payload.runtimeVersion, "2026-08-26.6");
   assert.equal(payload.integrations.telegram, false);
   assert.equal(payload.integrations.managedBots, false);
   assert.equal(payload.integrations.minds, false);
@@ -306,7 +306,7 @@ test("automatically contains high-confidence social engineering from a verified 
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.ok(payload.verdict.rules.includes("scam_social_engineering"));
-  assert.equal(payload.creatorAlertRequired, false);
+  assert.equal(payload.creatorAlertRequired, true);
   assert.ok(
     payload.plan.some(
       (item) => item.action === "delete" && item.automatic === true,
@@ -318,6 +318,49 @@ test("automatically contains high-confidence social engineering from a verified 
         item.action === "mute" &&
         item.automatic === true &&
         item.durationSeconds === 3_600,
+    ),
+  );
+});
+
+test("contains the screenshot reward-DM scam even when Minds is uncertain", async () => {
+  const worker = await loadWorker();
+  const response = await worker.fetch(
+    new Request("http://localhost/api/moderation/check", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-fairturn-admin-secret": "test-admin-secret",
+      },
+      body: JSON.stringify({
+        message:
+          "Congratulations to first 10 people to DM me. I can help activate your reward. DM me privately and I'll send the instructions.",
+        safetyAssessment: {
+          intent: "uncertain",
+          confidence: 0.4,
+          evidence: ["Minds did not return a sufficiently certain intent."],
+        },
+        adminIdentity: {
+          checked: true,
+          senderIsAdministrator: false,
+          hasStrongIdentitySimilarity: false,
+          identityConfidence: 0,
+          evidence: ["Telegram verified the sender is not an administrator."],
+        },
+      }),
+    }),
+    runtimeEnv,
+    executionContext,
+  );
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.ok(payload.verdict.rules.includes("scam_social_engineering"));
+  assert.equal(payload.verdict.immediateDeleteRecommended, true);
+  assert.equal(payload.creatorAlertRequired, true);
+  assert.ok(payload.plan.some((item) => item.action === "delete"));
+  assert.ok(
+    payload.plan.some(
+      (item) =>
+        item.action === "mute" && item.durationSeconds === 3_600,
     ),
   );
 });

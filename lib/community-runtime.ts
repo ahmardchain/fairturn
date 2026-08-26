@@ -33,6 +33,7 @@ import { DEFAULT_WELCOME_MESSAGE } from "./agent-defaults";
 import {
   fairTurnConversation,
   isRepliedMessageDeletionRequest,
+  repliedMessageModerationIntent,
 } from "./telegram-conversation";
 import { redactMessage } from "./triage";
 import { writeAuditEvent } from "./workspace";
@@ -280,7 +281,9 @@ export async function executeModerationPlan(input: {
       reason: planned.reason.slice(0, 500),
       status: "automatic_pending",
       approvedByTelegramUserId: input.creatorAlertRequired
-        ? "anti_impersonation_shield"
+        ? input.verdict.rules.includes("admin_impersonation_scam")
+          ? "anti_impersonation_shield"
+          : "scam_containment"
         : "community_auto_policy",
       telegramResultJson: JSON.stringify({
         detector: "fairturn_rules_and_mind",
@@ -338,6 +341,15 @@ export async function executeModerationPlan(input: {
   let creatorAlertStatus: "not_required" | "sent" | "failed" =
     "not_required";
   if (input.creatorAlertRequired) {
+    const isImpersonationScam = input.verdict.rules.includes(
+      "admin_impersonation_scam",
+    );
+    const decisionKind = isImpersonationScam
+      ? "impersonation_ban"
+      : "scam_ban";
+    const detector = isImpersonationScam
+      ? "fairturn_anti_impersonation_shield"
+      : "fairturn_scam_containment";
     const banActionId = crypto.randomUUID();
     const decisionCreatedAt = new Date().toISOString();
     const matchedAdmin = input.adminIdentity?.closestAdmin;
@@ -354,16 +366,22 @@ export async function executeModerationPlan(input: {
       .map((entry) => `• ${entry}`)
       .join("\n");
     const alert = [
-      "🛡️ FairTurn Anti-Impersonation Shield",
+      isImpersonationScam
+        ? "🛡️ FairTurn Anti-Impersonation Shield"
+        : "🛡️ FairTurn Scam Containment Alert",
       `Group: ${redactMessage(input.chatTitle ?? input.chatId).slice(0, 120)}`,
       `Sender: ${redactMessage(input.targetDisplayName ?? "Unknown member").slice(0, 80)}${input.targetUsername ? ` (@${redactMessage(input.targetUsername).slice(0, 64)})` : ""}`,
       `User ID: ${input.targetUserId}`,
       `Message ID: ${input.messageId}`,
       matchedAdmin
         ? `Resembled admin: ${redactMessage(matchedAdmin.adminDisplayName).slice(0, 80)}${matchedAdmin.adminUsername ? ` (@${redactMessage(matchedAdmin.adminUsername).slice(0, 64)})` : ""}`
-        : "Resembled admin: verified identity match",
+        : isImpersonationScam
+          ? "Resembled admin: verified identity match"
+          : "Identity: Telegram verified the sender is not a group administrator",
       `Minds intent: ${input.safetyAssessment?.intent ?? "scam_social_engineering"} (${Math.round((input.safetyAssessment?.confidence ?? input.verdict.confidence) * 100)}%)`,
-      evidenceLines ? `Evidence:\n${evidenceLines}` : "Evidence: high-confidence hybrid identity and intent match",
+      evidenceLines
+        ? `Evidence:\n${evidenceLines}`
+        : "Evidence: high-confidence contextual scam intent",
       `Actions: ${actionSummary || "execution unavailable"}`,
       "Decision: Approve to ban the sender permanently, or reject the ban. The one-hour safety mute remains until it expires.",
       "Safety note: FairTurn did not reproduce the suspected scam link.",
@@ -377,12 +395,14 @@ export async function executeModerationPlan(input: {
       targetUserId: input.targetUserId,
       messageId: input.messageId,
       action: "ban",
-      reason: "Creator review of a high-confidence administrator impersonation scam.",
+      reason: isImpersonationScam
+        ? "Creator review of a high-confidence administrator impersonation scam."
+        : "Creator review of a high-confidence social-engineering scam.",
       status: "pending",
       approvedByTelegramUserId: "awaiting_creator_ban_decision",
       telegramResultJson: JSON.stringify({
-        decisionKind: "impersonation_ban",
-        detector: "fairturn_anti_impersonation_shield",
+        decisionKind,
+        detector,
         rules: input.verdict.rules,
         confidence: input.verdict.confidence,
         automaticContainmentApplied: true,
@@ -434,8 +454,8 @@ export async function executeModerationPlan(input: {
         .set({
           status: "alert_failed",
           telegramResultJson: JSON.stringify({
-            decisionKind: "impersonation_ban",
-            detector: "fairturn_anti_impersonation_shield",
+            decisionKind,
+            detector,
             error:
               error instanceof Error
                 ? error.message
@@ -539,7 +559,11 @@ function parseDuration(value: string) {
 type CommunityConversationAction =
   | { type: "start" | "help" | "settings" | "rules" | "links" | "roles" }
   | { type: "report"; reason: string }
-  | { type: "delete" | "mute" | "ban"; reason: string; durationSeconds?: number }
+  | {
+      type: "delete" | "pin" | "mute" | "ban";
+      reason: string;
+      durationSeconds?: number;
+    }
   | { type: "poll_create"; request: PollCreationRequest }
   | { type: "poll_details"; explicitId?: string };
 
@@ -621,7 +645,11 @@ export function parseCommunityConversationAction(input: {
     };
   }
 
-  if (isRepliedMessageDeletionRequest(input)) {
+  const repliedModerationIntent = repliedMessageModerationIntent(input);
+  if (
+    repliedModerationIntent === "delete" ||
+    isRepliedMessageDeletionRequest(input)
+  ) {
     const statedReason = text.match(/\b(?:because|for)\s+([\s\S]+)$/iu)?.[1];
     return {
       type: "delete",
@@ -631,8 +659,30 @@ export function parseCommunityConversationAction(input: {
     };
   }
 
+  if (repliedModerationIntent === "pin") {
+    return {
+      type: "pin",
+      reason: "Administrator explicitly requested pinning the replied-to message.",
+    };
+  }
+
+  if (repliedModerationIntent === "mute") {
+    return {
+      type: "mute",
+      durationSeconds: parseDuration(text),
+      reason: "Administrator requested a temporary mute for the replied-to member.",
+    };
+  }
+
+  if (repliedModerationIntent === "ban") {
+    return {
+      type: "ban",
+      reason: "Administrator explicitly requested removing the replied-to member.",
+    };
+  }
+
   const mute = text.match(
-    /^(?:mute|silence|time\s*out)\b(?:\s+(?:this|that|the)\s+(?:member|user|person))?(?:\s+(?:him|her|them))?(?:\s+for\s+([\s\S]+?))?(?:\s+(?:because|for)\s+([\s\S]+))?[?.!]*$/iu,
+    /^(?:mute|silence|time\s*out|restrict)\b(?:\s+(?:this|that|the)\s+(?:member|user|person))?(?:\s+(?:him|her|them))?(?:\s+for\s+([\s\S]+?))?(?:\s+(?:because|for)\s+([\s\S]+))?[?.!]*$/iu,
   );
   if (mute) {
     return {
@@ -643,7 +693,7 @@ export function parseCommunityConversationAction(input: {
   }
 
   const ban = text.match(
-    /^(?:ban|kick)\b(?:\s+(?:this|that|the)\s+(?:member|user|person))?(?:\s+(?:him|her|them))?(?:\s+(?:because|for)\s+([\s\S]+))?[?.!]*$/iu,
+    /^(?:ban|kick(?:\s*out)?)\b(?:\s+(?:this|that|the)\s+(?:member|user|person))?(?:\s+(?:him|her|them))?(?:\s+(?:because|for)\s+([\s\S]+))?[?.!]*$/iu,
   );
   if (ban) {
     return {
@@ -797,6 +847,7 @@ export async function handleCommunityConversationAction(input: {
 
   if (
     request.type === "delete" ||
+    request.type === "pin" ||
     request.type === "mute" ||
     request.type === "ban"
   ) {
@@ -807,12 +858,19 @@ export async function handleCommunityConversationAction(input: {
       userId: input.message.from.id,
     });
     if (!isAdmin) {
-      await send("Only a group administrator can ask me to delete, mute, or ban.");
+      await send("Only a group administrator can ask me to delete, pin, mute, or ban.");
       return true;
     }
     const repliedMessageId = input.message.reply_to_message?.message_id;
-    if (request.type === "delete" && !repliedMessageId) {
-      await send("Reply to the message you want me to delete.");
+    if (
+      (request.type === "delete" || request.type === "pin") &&
+      !repliedMessageId
+    ) {
+      await send(
+        request.type === "delete"
+          ? "Reply to the message you want me to delete."
+          : "Reply to the message you want me to pin.",
+      );
       return true;
     }
     const targetUserId = input.message.reply_to_message?.from?.id
@@ -820,6 +878,7 @@ export async function handleCommunityConversationAction(input: {
       : undefined;
     if (
       request.type !== "delete" &&
+      request.type !== "pin" &&
       (!targetUserId || targetUserId === input.botTelegramUserId)
     ) {
       await send(
@@ -849,17 +908,25 @@ export async function handleCommunityConversationAction(input: {
       updatedAt: now,
     });
     try {
-      await executeTelegramModeration(input.token, {
-        chatId,
-        targetUserId,
-        messageId:
-          request.type === "delete" && repliedMessageId
-            ? String(repliedMessageId)
-            : undefined,
-        action: request.type,
-        durationSeconds: duration,
-        reason: `Admin-confirmed conversational ${request.type}: ${redactMessage(request.reason).slice(0, 240)}`,
-      });
+      if (request.type === "pin") {
+        await telegramBotApi(input.token, "pinChatMessage", {
+          chat_id: chatId,
+          message_id: repliedMessageId,
+          disable_notification: false,
+        });
+      } else {
+        await executeTelegramModeration(input.token, {
+          chatId,
+          targetUserId,
+          messageId:
+            request.type === "delete" && repliedMessageId
+              ? String(repliedMessageId)
+              : undefined,
+          action: request.type,
+          durationSeconds: duration,
+          reason: `Admin-confirmed conversational ${request.type}: ${redactMessage(request.reason).slice(0, 240)}`,
+        });
+      }
       await db
         .update(moderationActions)
         .set({ status: "executed", updatedAt: new Date().toISOString() })
@@ -867,9 +934,11 @@ export async function handleCommunityConversationAction(input: {
       await send(
         request.type === "delete"
           ? "🗑️ Message deleted."
-          : request.type === "mute"
-            ? "🔇 Member muted."
-            : "🚫 Member banned.",
+          : request.type === "pin"
+            ? "📌 Message pinned."
+            : request.type === "mute"
+              ? "🔇 Member muted."
+              : "🚫 Member banned.",
       );
     } catch (error) {
       await db
@@ -887,52 +956,18 @@ export async function handleCommunityConversationAction(input: {
           ? permissionFailure
             ? "I couldn’t delete that message because Telegram has not granted the required permission. Make FairTurn a group admin with Delete messages permission, then try again."
             : "I couldn’t delete that message. It may be too old or already removed; check FairTurn’s Delete messages permission."
-          : permissionFailure
-            ? "Telegram blocked that action. Enable FairTurn’s Ban users / Restrict members administrator permission."
-            : "I could not execute that action. Check FairTurn's admin permissions.",
+          : request.type === "pin"
+            ? permissionFailure
+              ? "I couldn’t pin that message because Telegram has not granted the required permission. Enable FairTurn’s Pin messages administrator permission, then try again."
+              : "I couldn’t pin that message. Check FairTurn’s Pin messages administrator permission."
+            : permissionFailure
+              ? "Telegram blocked that action. Enable FairTurn’s Ban users / Restrict members administrator permission."
+              : "I could not execute that action. Check FairTurn's admin permissions.",
       );
     }
     return true;
   }
   return false;
-}
-
-export async function maybePinAnnouncement(input: {
-  token: string;
-  botUsername?: string;
-  botTelegramUserId?: string;
-  message: CommunityTelegramMessage;
-}) {
-  const conversation = fairTurnConversation(input);
-  if (
-    !conversation.directed ||
-    !/^(?:(?:pin|publish)\s+(?:this|that|it)(?:\s+message)?(?:\s+as)?|make\s+(?:this|that|it)(?:\s+message)?)(?:\s+an?|\s+the)?\s*announcement[?.!]*$/iu.test(
-      conversation.text,
-    ) ||
-    !input.message.from
-  ) {
-    return false;
-  }
-  if (
-    !(await isTelegramAdministrator({
-      token: input.token,
-      chatId: input.message.chat.id,
-      userId: input.message.from.id,
-    }))
-  ) {
-    return false;
-  }
-  try {
-    await telegramBotApi(input.token, "pinChatMessage", {
-      chat_id: String(input.message.chat.id),
-      message_id:
-        input.message.reply_to_message?.message_id ?? input.message.message_id,
-      disable_notification: false,
-    });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export function isSimpleCommunityGreeting(text: string) {

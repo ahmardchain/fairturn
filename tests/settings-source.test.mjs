@@ -98,7 +98,8 @@ test("Anti-Impersonation Shield combines verified Telegram identity with Minds i
     /action: "mute"[\s\S]*durationSeconds: 3_600/,
   );
   assert.match(runtimeSource, /FairTurn Anti-Impersonation Shield/);
-  assert.match(runtimeSource, /decisionKind: "impersonation_ban"/);
+  assert.match(runtimeSource, /"impersonation_ban"/);
+  assert.match(runtimeSource, /"scam_ban"/);
   assert.match(runtimeSource, /text: "✅ Approve ban"/);
   assert.match(runtimeSource, /text: "❌ Reject ban"/);
   assert.match(runtimeSource, /creator_alert_status/);
@@ -560,7 +561,10 @@ test("selected Telegram Business inbox messages receive a subagent reply without
   assert.match(webhookSource, /sender_business_bot\?: TelegramUser/);
   assert.match(webhookSource, /Edited Telegram Business messages do not trigger another automatic reply/);
   assert.match(webhookSource, /Outgoing Telegram Business messages do not trigger automatic replies/);
-  assert.match(webhookSource, /const shouldReplyToMessage =\s+isBusinessMessage \|\|/);
+  assert.match(
+    webhookSource,
+    /const shouldReplyToMessage =\s+isNewMessageUpdate &&\s+\(isBusinessMessage \|\|/,
+  );
   assert.match(webhookSource, /function telegramBusinessGreeting/);
   assert.match(webhookSource, /`Hi! \$\{displayName\}\. How can I help\?`/);
   assert.match(webhookSource, /accepted: "business_greeting"/);
@@ -670,7 +674,8 @@ test("new group replies receive a best-effort eyes reaction on the original mess
     webhookSource,
     /token = await managedToken[\s\S]*await reactToRepliedGroupMessage[\s\S]*const typing = startTelegramTyping/,
   );
-  assert.match(webhookSource, /isNewMessage: Boolean\(update\.message\)/);
+  assert.match(webhookSource, /isNewMessage: isNewMessageUpdate/);
+  assert.match(webhookSource, /repliedMessageModerationIntent/);
 });
 
 test("first private conversation asks for and remembers the user's chosen name", async () => {
@@ -745,11 +750,14 @@ test("admin reply moderation runs before knowledge lookup and can delete the tar
     "community moderation must run before knowledge mutation",
   );
   assert.match(runtimeSource, /type: "delete"/);
-  assert.match(conversationSource, /@fairturn\[a-z0-9_\]\*/);
+  assert.match(conversationSource, /only the addressed[\s\S]*agent owns the request/i);
   assert.match(conversationSource, /isRepliedMessageDeletionRequest/);
+  assert.match(conversationSource, /repliedMessageModerationIntent/);
   assert.match(conversationSource, /masssage/);
   assert.match(conversationSource, /memory\|knowledge\|source\|document\|file/);
   assert.match(runtimeSource, /request\.type === "delete"/);
+  assert.match(runtimeSource, /request\.type === "pin"/);
+  assert.match(runtimeSource, /"pinChatMessage"/);
   assert.match(knowledgeSource, /A short delete\/remove instruction/);
   assert.match(knowledgeSource, /message\.reply_to_message/);
   assert.match(runtimeSource, /messageId:[\s\S]*String\(repliedMessageId\)/);
@@ -758,6 +766,9 @@ test("admin reply moderation runs before knowledge lookup and can delete the tar
   assert.match(webhookSource, /Permanent ban approved and completed/);
   assert.match(webhookSource, /senderIsVerifiedAdministrator/);
   assert.match(webhookSource, /!senderIsVerifiedAdministrator/);
+  assert.match(webhookSource, /fairturn_community_moderation:/);
+  assert.match(webhookSource, /updateKind: "automatic_moderation_claim"/);
+  assert.match(webhookSource, /shouldClaimAutomaticModeration && automaticModerationClaim/);
   assert.match(webhookSource, /trustedContextualModerationReason/);
   assert.doesNotMatch(
     webhookSource,

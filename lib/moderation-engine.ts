@@ -76,6 +76,9 @@ const urlPattern = /\bhttps?:\/\/[^\s<>]+|\b(?:www\.)?[a-z0-9][a-z0-9-]*(?:\.[a-
 const shortenerPattern = /\b(?:bit\.ly|tinyurl\.com|t\.co|cutt\.ly|rb\.gy|is\.gd|shorturl\.at)\b/iu;
 const riskyTldPattern = /\.(?:click|top|xyz|live|win|loan|zip|mov)(?:\/|\b)/iu;
 const cryptoScamPattern = /\b(?:connect\s+(?:your\s+)?wallet|validate\s+(?:your\s+)?wallet|wallet\s+verification|seed\s+phrase|recovery\s+phrase|private\s+key|claim\s+(?:your\s+)?(?:airdrop|tokens?)|guaranteed\s+(?:profit|returns?)|double\s+your\s+(?:crypto|money)|wallet\s+drainer|send\s+\w+\s+to\s+receive\s+\w+)\b/iu;
+const rewardLurePattern = /\b(?:congratulations?|winner|won|giveaway|reward|prize|bonus|selected|eligible|first\s+\d+\s+(?:people|members|users))\b/iu;
+const privateContactPattern = /\b(?:(?:dm|direct\s*message|message|contact|inbox|reach)\s+(?:me|us)|(?:me|us)\s+(?:in\s+)?private|private\s+(?:chat|message)|message\s+me\s+privately)\b/iu;
+const activationOrClaimPattern = /\b(?:activate|activation|claim|collect|unlock|redeem|verify|verification|release|instructions?|account\s+step|wallet\s+step)\b/iu;
 const referralPattern = /(?:[?&](?:ref|referral|invite|affiliate)=|\b(?:referral|invite)\s*(?:code|link)\b|\buse\s+(?:my\s+)?code\b)/iu;
 const threatPattern = /\b(?:i(?:'ll|\s+will)\s+(?:kill|hurt|attack)|we(?:'ll|\s+will)\s+(?:kill|hurt|attack)|you\s+(?:should|will)\s+die|kill\s+yourself|i\s+know\s+where\s+you\s+live)\b/iu;
 const harassmentPattern = /\b(?:worthless|nobody\s+wants\s+you|keep\s+crying|go\s+die|stupid\s+(?:idiot|loser)|shut\s+up\s+you)\b/iu;
@@ -148,6 +151,17 @@ export function detectModerationSignals(input: {
   };
 
   if (cryptoScamPattern.test(text)) add("crypto_scam", "severe", 0.98);
+  // Compound intent fail-safe: a reward lure plus an attempt to move members
+  // into a private activation/claim flow is actionable social engineering even
+  // when no URL or wallet keyword appears. Telegram administrator verification
+  // is applied later before FairTurn executes any containment.
+  if (
+    rewardLurePattern.test(text) &&
+    privateContactPattern.test(text) &&
+    activationOrClaimPattern.test(text)
+  ) {
+    add("scam_social_engineering", "high", 0.97);
+  }
   if (
     urls.some((url) => shortenerPattern.test(url) || riskyTldPattern.test(url)) &&
     /\b(?:claim|wallet|verify|urgent|bonus|airdrop|free|token)\b/iu.test(text)
@@ -177,7 +191,9 @@ export function detectModerationSignals(input: {
   const immediateDeleteRecommended = rules.some((rule) =>
     [
       "crypto_scam",
+      "scam_social_engineering",
       "suspicious_link",
+      "repeated_message",
       "nsfw_text",
       "doxxing",
       "credible_threat",
@@ -227,6 +243,7 @@ export function planContextualSafetyOverride(input: {
   );
   const contextualEvidence = Array.from(
     new Set([
+      ...input.deterministicVerdict.evidence,
       ...(input.adminIdentity?.evidence ?? []),
       ...input.safetyAssessment.evidence,
     ]),
@@ -278,16 +295,31 @@ export function planContextualSafetyOverride(input: {
     };
   }
 
+  const deterministicHighConfidenceSocialEngineering = Boolean(
+    input.deterministicVerdict.rules.includes("scam_social_engineering") &&
+      input.deterministicVerdict.confidence >= 0.94,
+  );
+  const mindsHighConfidenceSocialEngineering = Boolean(
+    input.safetyAssessment.intent === "scam_social_engineering" &&
+      confidence >= 0.86,
+  );
   const highConfidenceSocialEngineering = Boolean(
     input.adminIdentity?.checked &&
       !input.adminIdentity.senderIsAdministrator &&
-      input.safetyAssessment.intent === "scam_social_engineering" &&
-      confidence >= 0.94,
+      (mindsHighConfidenceSocialEngineering ||
+        deterministicHighConfidenceSocialEngineering),
   );
 
   if (highConfidenceSocialEngineering) {
-    const reason =
-      "Minds detected high-confidence social-engineering intent from a non-admin member.";
+    const effectiveConfidence = Math.max(
+      deterministicHighConfidenceSocialEngineering
+        ? input.deterministicVerdict.confidence
+        : 0,
+      mindsHighConfidenceSocialEngineering ? confidence : 0,
+    );
+    const reason = mindsHighConfidenceSocialEngineering
+      ? "Minds and FairTurn detected high-confidence social-engineering intent from a verified non-admin member."
+      : "FairTurn detected a compound reward lure, private-contact request, and activation or claim flow from a verified non-admin member.";
     return {
       verdict: {
         ...input.deterministicVerdict,
@@ -299,10 +331,14 @@ export function planContextualSafetyOverride(input: {
           ]),
         ),
         severity: "high",
-        confidence,
+        confidence: effectiveConfidence,
         reason,
         immediateDeleteRecommended: true,
-        detector: "minds_contextual",
+        detector: mindsHighConfidenceSocialEngineering
+          ? deterministicHighConfidenceSocialEngineering
+            ? "hybrid"
+            : "minds_contextual"
+          : "deterministic",
         evidence: contextualEvidence,
       },
       plan: [
@@ -319,9 +355,9 @@ export function planContextualSafetyOverride(input: {
           reason,
         },
       ],
-      // Permanent bans remain a creator decision. Ban approval is requested
-      // only when Telegram also verifies resemblance to an administrator.
-      creatorAlertRequired: false,
+      // Permanent bans always remain a creator decision. FairTurn performs
+      // reversible containment first, then asks the creator once.
+      creatorAlertRequired: true,
     };
   }
 
