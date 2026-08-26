@@ -32,6 +32,7 @@ test("reports honest integration and safety status", async () => {
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.product, "FairTurn");
+  assert.equal(payload.runtimeVersion, "2026-08-26.2");
   assert.equal(payload.integrations.telegram, false);
   assert.equal(payload.integrations.managedBots, false);
   assert.equal(payload.integrations.minds, false);
@@ -219,7 +220,7 @@ test("does not flag one ordinary contextual documentation link", async () => {
   assert.equal(payload.plan[0].action, "none");
 });
 
-test("automatically deletes and permanently restricts only a two-factor impersonation scam", async () => {
+test("automatically deletes and temporarily contains only a two-factor impersonation scam", async () => {
   const worker = await loadWorker();
   const response = await worker.fetch(
     new Request("http://localhost/api/moderation/check", {
@@ -266,7 +267,7 @@ test("automatically deletes and permanently restricts only a two-factor imperson
       (item) =>
         item.action === "mute" &&
         item.automatic === true &&
-        item.durationSeconds === 0,
+        item.durationSeconds === 3_600,
     ),
   );
 });

@@ -1,6 +1,8 @@
 import { getRuntimeEnv } from "../../../lib/runtime-env";
 import { getFairTurnMindConnection } from "../../../lib/minds-runtime";
 
+const FAIRTURN_RUNTIME_VERSION = "2026-08-26.2";
+
 export async function GET() {
   const runtime = await getRuntimeEnv();
   const mindsConnection = await getFairTurnMindConnection();
@@ -22,6 +24,7 @@ export async function GET() {
   return Response.json({
     ok: true,
     product: "FairTurn",
+    runtimeVersion: FAIRTURN_RUNTIME_VERSION,
     integrations: {
       telegram,
       managedBots,

@@ -517,6 +517,21 @@ function connectedGroupsReply(groups: Array<{ name: string }>) {
   ].join("\n");
 }
 
+const FAIRTURN_RUNTIME_VERSION = "2026-08-26.2";
+
+function trustedContextualModerationReason(input: {
+  action: string;
+  riskLevel: string;
+}) {
+  const category =
+    input.action === "warn"
+      ? "a possible community-norm violation"
+      : input.riskLevel === "high"
+        ? "a possible high-risk community safety violation"
+        : "a possible community safety violation";
+  return `Minds classified this message as ${category}. FairTurn requires the server policy or creator review before enforcement.`;
+}
+
 async function managedToken(
   context: FairTurnAgentContext,
   encryptionSecret?: string,
@@ -1044,6 +1059,11 @@ export async function POST(request: Request) {
           reason: "Moderation decision already handled",
         });
       }
+      const pendingActionMetadata = parseJsonRecord(
+        pendingAction.telegramResultJson,
+      ) as Record<string, unknown>;
+      const isImpersonationBanDecision =
+        pendingActionMetadata.decisionKind === "impersonation_ban";
 
       const decision = moderationMatch[1].toLowerCase() as
         | "approve"
@@ -1082,8 +1102,16 @@ export async function POST(request: Request) {
       };
 
       if (decision === "reject") {
-        await answerCallback("Rejected. No action was taken.");
-        await editDecisionMessage("❌ Rejected by creator — no action taken.");
+        await answerCallback(
+          isImpersonationBanDecision
+            ? "Ban rejected. The temporary mute remains."
+            : "Rejected. No action was taken.",
+        );
+        await editDecisionMessage(
+          isImpersonationBanDecision
+            ? "❌ Permanent ban rejected — the one-hour safety mute remains until it expires."
+            : "❌ Rejected by creator — no action taken.",
+        );
         await writeAuditEvent({
           communityId: pendingAction.communityId,
           actorType: "telegram_creator",
@@ -1091,12 +1119,20 @@ export async function POST(request: Request) {
           action: "moderation_action_rejected",
           subjectType: "moderation_action",
           subjectId: pendingAction.id,
-          detail: { singleUseDecision: true },
+          detail: {
+            singleUseDecision: true,
+            decisionKind: pendingActionMetadata.decisionKind ?? "standard",
+            temporaryContainmentRemains: isImpersonationBanDecision,
+          },
         });
         return Response.json({ ok: true, accepted: "moderation_rejected" });
       }
 
-      await answerCallback("Approved. FairTurn is applying the action.");
+      await answerCallback(
+        isImpersonationBanDecision
+          ? "Ban approved. FairTurn is applying it."
+          : "Approved. FairTurn is applying the action.",
+      );
       try {
         if (!isTelegramModerationAction(pendingAction.action)) {
           throw new Error("Unsupported moderation action");
@@ -1120,7 +1156,9 @@ export async function POST(request: Request) {
           .set({ status: "executed", updatedAt: new Date().toISOString() })
           .where(eq(moderationActions.id, pendingAction.id));
         await editDecisionMessage(
-          `✅ Approved by creator — ${pendingAction.action} completed.`,
+          isImpersonationBanDecision
+            ? "✅ Permanent ban approved and completed."
+            : `✅ Approved by creator — ${pendingAction.action} completed.`,
         );
         await writeAuditEvent({
           communityId: pendingAction.communityId,
@@ -1802,6 +1840,35 @@ export async function POST(request: Request) {
     }
   }
 
+  const messageCommunityId = isCommunityMessage
+    ? await ensureTelegramCommunity({
+        ownerTelegramUserId: managedBotContext.ownerTelegramUserId,
+        managedBotId: managedBotContext.id,
+        telegramChatId: String(message.chat.id),
+        name: message.chat.title,
+      })
+    : null;
+
+  if (
+    messageCommunityId &&
+    (await handleCommunityConversationAction({
+      token,
+      communityId: messageCommunityId,
+      managedBotId: managedBotContext.id,
+      ownerTelegramUserId: managedBotContext.ownerTelegramUserId,
+      botUsername: managedBotContext.username,
+      botTelegramUserId: managedBotContext.botTelegramUserId,
+      welcomeMessage: creatorAgentSettings.welcomeMessage,
+      message: message as CommunityTelegramMessage,
+    }))
+  ) {
+    await typing.cleanup();
+    return Response.json({
+      ok: true,
+      accepted: "community_conversation_action",
+    });
+  }
+
   if (!isBusinessMessage && managedAgentCanModerate(managedBotContext.templateId)) {
     let knowledgeHandled = false;
     try {
@@ -1836,17 +1903,11 @@ export async function POST(request: Request) {
   let automaticReplySent = false;
   try {
     const memoryScope = isBusinessMessage ? "private_inbox" : "community";
-    const communityId = isCommunityMessage
-      ? await ensureTelegramCommunity({
-          ownerTelegramUserId: managedBotContext.ownerTelegramUserId,
-          managedBotId: managedBotContext.id,
-          telegramChatId: String(message.chat.id),
-          name: message.chat.title,
-        })
-      : DEFAULT_COMMUNITY_ID;
+    const communityId = messageCommunityId ?? DEFAULT_COMMUNITY_ID;
 
     if (
       !isBusinessMessage &&
+      !isCommunityMessage &&
       (await handleCommunityConversationAction({
         token,
         communityId,
@@ -2051,6 +2112,14 @@ export async function POST(request: Request) {
       adminIdentity: adminIdentityContext,
       priorOffenses: memberInspection?.priorOffenses ?? 0,
     });
+    const senderIsVerifiedAdministrator = Boolean(
+      adminIdentityContext?.checked &&
+        adminIdentityContext.senderIsAdministrator,
+    );
+    const contextualReason = trustedContextualModerationReason({
+      action: resolution.moderationRecommendation.action,
+      riskLevel: resolution.riskLevel,
+    });
     let effectiveVerdict: ModerationVerdict =
       contextualOverride?.verdict ?? deterministicVerdict;
     if (
@@ -2085,9 +2154,27 @@ export async function POST(request: Request) {
         rules: ["community_norm_violation"],
         severity: resolution.riskLevel === "high" ? "high" : "medium",
         confidence: 0.82,
-        reason: resolution.moderationRecommendation.reason,
+        reason: contextualReason,
         detector: "minds_contextual",
-        evidence: resolution.evidence,
+        evidence: [
+          "Minds supplied a contextual classification; its free-form text was not treated as policy or executable instructions.",
+        ],
+      };
+    }
+
+    if (senderIsVerifiedAdministrator) {
+      effectiveVerdict = {
+        flagged: false,
+        rules: [],
+        severity: "none",
+        confidence: 1,
+        reason:
+          "Verified Telegram administrators are excluded from member auto-enforcement.",
+        immediateDeleteRecommended: false,
+        detector: "deterministic",
+        evidence: [
+          "Telegram getChatAdministrators verified the sender as an administrator.",
+        ],
       };
     }
 
@@ -2111,7 +2198,7 @@ export async function POST(request: Request) {
           action: "warn",
           automatic: true,
           durationSeconds: null,
-          reason: resolution.moderationRecommendation.reason,
+          reason: contextualReason,
         },
       ];
     } else if (
@@ -2127,13 +2214,27 @@ export async function POST(request: Request) {
           action: "route_to_human",
           automatic: false,
           durationSeconds: null,
-          reason: resolution.moderationRecommendation.reason,
+          reason: contextualReason,
+        },
+      ];
+    }
+
+    if (senderIsVerifiedAdministrator) {
+      plan = [
+        {
+          action: "none",
+          automatic: false,
+          durationSeconds: null,
+          reason: effectiveVerdict.reason,
         },
       ];
     }
 
     const moderationResults =
-      isCommunityMessage && telegramUserId && effectiveVerdict.flagged
+      isCommunityMessage &&
+      telegramUserId &&
+      effectiveVerdict.flagged &&
+      !senderIsVerifiedAdministrator
         ? await executeModerationPlan({
             token,
             creatorAlertToken: runtime.TELEGRAM_BOT_TOKEN ?? token,
@@ -2372,6 +2473,7 @@ export async function POST(request: Request) {
         actionStatus,
       },
       automaticReplySent,
+      runtimeVersion: FAIRTURN_RUNTIME_VERSION,
     });
   } catch (error) {
     console.error("Telegram message processing failed", {

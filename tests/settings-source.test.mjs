@@ -95,9 +95,12 @@ test("Anti-Impersonation Shield combines verified Telegram identity with Minds i
   );
   assert.match(
     moderationSource,
-    /action: "mute"[\s\S]*durationSeconds: 0/,
+    /action: "mute"[\s\S]*durationSeconds: 3_600/,
   );
   assert.match(runtimeSource, /FairTurn Anti-Impersonation Shield/);
+  assert.match(runtimeSource, /decisionKind: "impersonation_ban"/);
+  assert.match(runtimeSource, /text: "✅ Approve ban"/);
+  assert.match(runtimeSource, /text: "❌ Reject ban"/);
   assert.match(runtimeSource, /creator_alert_status/);
   assert.match(webhookSource, /inspectAdminIdentity/);
   assert.match(webhookSource, /creatorAlertToken: runtime\.TELEGRAM_BOT_TOKEN/);
@@ -716,4 +719,39 @@ test("creator moderation decisions use single-use owner-only Telegram buttons", 
   assert.match(webhookSource, /reply_markup: \{ inline_keyboard: \[\] \}/);
   assert.match(webhookSource, /moderation_action_rejected/);
   assert.match(webhookSource, /moderation_action_approved_and_executed/);
+});
+
+test("admin reply moderation runs before knowledge lookup and can delete the target message", async () => {
+  const webhookSource = await readFile(
+    new URL("../app/api/telegram/webhook/route.ts", import.meta.url),
+    "utf8",
+  );
+  const runtimeSource = await readFile(
+    new URL("../lib/community-runtime.ts", import.meta.url),
+    "utf8",
+  );
+  const conversationSource = await readFile(
+    new URL("../lib/telegram-conversation.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.ok(
+    webhookSource.indexOf("await handleCommunityConversationAction") <
+      webhookSource.indexOf("await handleTelegramKnowledgeMessage"),
+    "community moderation must run before knowledge mutation",
+  );
+  assert.match(runtimeSource, /type: "delete"/);
+  assert.match(conversationSource, /@fairturn\[a-z0-9_\]\*/);
+  assert.match(runtimeSource, /request\.type === "delete"/);
+  assert.match(runtimeSource, /messageId:[\s\S]*String\(repliedMessageId\)/);
+  assert.match(runtimeSource, /Make FairTurn a group admin with Delete messages permission/);
+  assert.match(webhookSource, /temporaryContainmentRemains: isImpersonationBanDecision/);
+  assert.match(webhookSource, /Permanent ban approved and completed/);
+  assert.match(webhookSource, /senderIsVerifiedAdministrator/);
+  assert.match(webhookSource, /!senderIsVerifiedAdministrator/);
+  assert.match(webhookSource, /trustedContextualModerationReason/);
+  assert.doesNotMatch(
+    webhookSource,
+    /reason: resolution\.moderationRecommendation\.reason/,
+  );
 });

@@ -20,7 +20,10 @@ export function fairTurnConversation(input: {
 }) {
   const original = conversationText(input.message);
   const username = input.botUsername?.replace(/^@/u, "").trim();
-  const addressPatterns = ["fairturn"];
+  // The runtime normally supplies the bot username. Keep a FairTurn-specific
+  // fallback because Telegram can deliver an update before a freshly created
+  // managed bot's username has been persisted locally.
+  const addressPatterns = ["@fairturn[a-z0-9_]*", "fairturn"];
   if (username) addressPatterns.push(`@${escapeRegExp(username)}`);
   const address = new RegExp(
     `^(?:hi\\s+|hey\\s+|hello\\s+)?(?:${addressPatterns.join("|")})(?:\\s+agent)?[,:.!]?\\s*`,
