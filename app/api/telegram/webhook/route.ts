@@ -517,7 +517,7 @@ function connectedGroupsReply(groups: Array<{ name: string }>) {
   ].join("\n");
 }
 
-const FAIRTURN_RUNTIME_VERSION = "2026-08-26.2";
+const FAIRTURN_RUNTIME_VERSION = "2026-08-26.3";
 
 function trustedContextualModerationReason(input: {
   action: string;
