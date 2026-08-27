@@ -246,12 +246,9 @@ tokens or keys.
 | `ADMIN_ACTION_SECRET` | Protects operator-only moderation and Minds routes |
 | `CRON_SECRET` | Protects scheduled automation execution |
 
-After the first Worker deployment creates `fairturn-db`, apply the committed D1
-migrations:
-
-```bash
-npm run db:migrate:remote
-```
+The `postdeploy` hook automatically applies the committed D1 migrations after
+Cloudflare provisions `fairturn-db`, including deployments started from the
+button above.
 
 For manual deployment:
 
@@ -259,12 +256,12 @@ For manual deployment:
 npm ci
 npm run build
 npm run deploy
-npm run db:migrate:remote
 ```
 
-Cloudflare’s deploy button provisions and binds resources automatically, but D1
-migrations run through the explicit command above. This keeps the repository
-free of another account’s database ID.
+Cloudflare’s deploy button provisions and binds resources automatically, and the
+post-deploy migration script discovers the provisioned D1 database before
+applying the schema. This keeps the repository free of another account’s
+database ID.
 
 ## Telegram setup
 
