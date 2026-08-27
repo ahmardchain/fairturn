@@ -15,6 +15,7 @@
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
     "db:migrate:remote": "node scripts/migrate-d1-remote.mjs",
     "deploy": "wrangler deploy",
+    "postdeploy": "npm run db:migrate:remote",
     "proof:minds": "node scripts/proof-minds.mjs"
   },
   "dependencies": {
